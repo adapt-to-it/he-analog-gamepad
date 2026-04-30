@@ -289,3 +289,9 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 - **Sonix Technology** -- Manufacturer of the microcontroller used in the X68PRO HE
 
 This project is not affiliated with, endorsed by, or connected to Attack Shark, Sonix Technology, or Microsoft. All trademarks belong to their respective owners. The protocol information was obtained through independent reverse engineering for interoperability purposes.
+
+---
+
+## Quick file sharing
+
+Learn how to quickly share files locally and remotely: [droplnk.app](https://droplnk.app) · [droplnk.app/s/](https://droplnk.app/s/)
