@@ -14,8 +14,10 @@ import time
 import json
 import os
 
-VID = 0x3151
-PID = 0x5030
+from device_config import load_device_ids
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "key_config.json")
+VID, PID, DEVICE_NAME = load_device_ids(CONFIG_PATH)
 
 ENABLE_CMD = [0x1B, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE3] + [0x00] * 56
 DISABLE_CMD = [0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE4] + [0x00] * 56
@@ -189,7 +191,7 @@ class KeyMapperGUI:
         kbd_devs = [d for d in devices if d.vendor_id == VID and d.product_id == PID]
 
         if not kbd_devs:
-            self.status_label.config(text="ERRORE: X68PRO HE non trovata!", fg="#ff4444")
+            self.status_label.config(text=f"ERRORE: {DEVICE_NAME} non trovata!", fg="#ff4444")
             return
 
         for d in kbd_devs:
@@ -465,7 +467,7 @@ class KeyMapperGUI:
         """Save the mapping to JSON config file."""
         config = {
             "device": {
-                "name": "X68PRO HE",
+                "name": DEVICE_NAME,
                 "vid": f"0x{VID:04X}",
                 "pid": f"0x{PID:04X}",
                 "vid_int": VID,
