@@ -1,4 +1,4 @@
-# X68PRO HE Virtual Gamepad
+# HE Analog Gamepad
 
 **Turn your analog Hall Effect keyboard into a true analog Xbox 360 controller.**
 
@@ -8,7 +8,9 @@
 
 ---
 
-This project reverse engineers the vendor-specific HID protocol of the **Attack Shark X68PRO HE** Hall Effect keyboard to extract real-time 16-bit analog key travel data, then feeds it into a virtual Xbox 360 controller via ViGEmBus. The result is **true analog stick input from WASD keys** -- not binary on/off, but smooth, pressure-sensitive movement proportional to how far you press each key.
+This project reverse engineers the vendor-specific HID protocol of Hall Effect keyboards to extract real-time 16-bit analog key travel data, then feeds it into a virtual Xbox 360 controller via ViGEmBus. The result is **true analog stick input from WASD keys** -- not binary on/off, but smooth, pressure-sensitive movement proportional to how far you press each key.
+
+The **Attack Shark X68PRO HE** is fully supported. Support for other Attack Shark HE models is in development: see [Supported Devices](#supported-devices).
 
 ## Features
 
@@ -18,12 +20,13 @@ This project reverse engineers the vendor-specific HID protocol of the **Attack 
   - **Full Controller** -- All keys mapped to Xbox buttons, sticks, and triggers. For games that require a single input device.
 - **Dual analog sticks** (Full Controller mode) -- Left stick (WASD) and right stick (IJKL) with independent analog axes
 - **Analog triggers** (Full Controller mode) -- Left and right triggers respond to key travel depth
-- **All 67 keys mapped** -- Complete key-to-ID mapping for every key on the 65% layout
+- **All 67 keys mapped** -- Complete key-to-ID mapping for every key on the X68PRO HE 65% layout
 - **Live controller visualization** -- Real-time GUI showing stick position, trigger bars, and active buttons
 - **Configurable curves** -- Deadzone, smoothing (EMA), and sensitivity curve (linear/exponential) sliders
 - **Customizable bindings** -- Remap any keyboard key to any gamepad action via the settings panel
 - **Persistent configuration** -- Bindings, settings, and selected mode saved to JSON, loaded automatically on startup
 - **Interactive key mapper** -- Visual tool to map (or remap) every physical key to its analog ID
+- **Guided capture page** -- Browser page that collects the data needed to support a new keyboard ([details](#help-add-your-keyboard))
 - **WebHID interceptor** -- JavaScript snippet for capturing the keyboard's protocol traffic in the browser
 - **120 Hz update rate** -- Gamepad state refreshed at ~120 Hz for low-latency response
 - **One-click launcher** -- `run.vbs` to start the app with a double-click, no terminal needed
@@ -55,7 +58,7 @@ The analog value is a 16-bit unsigned integer ranging from **0** (key released) 
 
 - **OS:** Windows 10 or later (uses native Windows HID API via ctypes)
 - **Python:** 3.10 or later
-- **Hardware:** Attack Shark X68PRO HE keyboard (Hall Effect variant)
+- **Hardware:** Attack Shark X68PRO HE keyboard (Hall Effect variant). Other models are in development, see [Supported Devices](#supported-devices).
 - **ViGEmBus driver:** Required for virtual Xbox 360 controller emulation
   - Download from [ViGEmBus releases](https://github.com/nefarius/ViGEmBus/releases)
 
@@ -68,8 +71,8 @@ The analog value is a 16-bit unsigned integer ranging from **0** (key released) 
 2. **Clone the repository**
 
    ```bash
-   git clone https://github.com/YOUR_USERNAME/x68pro-he-gamepad.git
-   cd x68pro-he-gamepad
+   git clone https://github.com/adapt-to-it/he-analog-gamepad.git
+   cd he-analog-gamepad
    ```
 
 3. **Create a virtual environment (recommended)**
@@ -85,7 +88,7 @@ The analog value is a 16-bit unsigned integer ranging from **0** (key released) 
    pip install -r requirements.txt
    ```
 
-5. **Connect your X68PRO HE keyboard** via USB
+5. **Connect your keyboard** via USB
 
 ## Usage
 
@@ -207,7 +210,9 @@ All bindings can be changed through the GUI settings panel or by editing `gamepa
 | Device | Status |
 |--------|--------|
 | Attack Shark X68PRO HE | Confirmed working |
-| Other Sonix-based HE keyboards | May work with key remapping -- use the key mapper to generate a new `key_config.json` |
+| Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
+| Attack Shark X98 HE (PID `0x5029`) | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
+| Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
 
 If your keyboard uses the same Sonix chipset (VID `0x3151`) and exposes a similar vendor-specific HID interface, it is likely compatible. Run `key_mapper_gui.py` to map the keys for your specific model.
 
@@ -258,7 +263,7 @@ The page only reads the keyboard. On Attack Shark / Sonix keyboards (VID `0x3151
 ## Project Structure
 
 ```
-x68pro-he-gamepad/
+he-analog-gamepad/
 ├── virtual_gamepad.py      # Main application -- virtual Xbox 360 controller with GUI
 ├── key_mapper_gui.py       # Interactive key mapping tool
 ├── device_config.py        # Reads VID/PID from key_config.json
