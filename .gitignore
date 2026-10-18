@@ -32,3 +32,6 @@ Thumbs.db
 
 # User config (keep template, ignore user-specific)
 gamepad_config.json
+
+# Code index
+.codegraph/
