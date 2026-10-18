@@ -25,13 +25,14 @@ import json
 import os
 import math
 
+from device_config import load_device_ids
+
 # ── Config ──────────────────────────────────────────────────────────
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "key_config.json")
 GAMEPAD_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "gamepad_config.json")
 
-VID = 0x3151
-PID = 0x5030
+VID, PID, DEVICE_NAME = load_device_ids(CONFIG_PATH)
 ENABLE_CMD = [0x1B, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE3] + [0x00] * 56
 DISABLE_CMD = [0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE4] + [0x00] * 56
 
