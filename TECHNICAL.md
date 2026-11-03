@@ -346,7 +346,7 @@ Windows only. The implementation relies on:
 
 ### Performance
 
-- **Gamepad update rate:** approximately 120 Hz.
+- **Gamepad update rate:** event-driven. A worker thread updates the virtual controller on every analog report, capped at about 1000 updates/s, and at least every 4 ms so smoothing can settle. Smoothing depends on elapsed time, not on the update rate.
 - **Smoothing:** Exponential Moving Average (EMA) with a configurable
   smoothing factor to reduce jitter in the analog readings.
 - **Diagonal stick clamping:** The resultant magnitude of combined X/Y axis

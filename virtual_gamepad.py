@@ -19,27 +19,48 @@ from tkinter import ttk
 import vgamepad as vg
 import pywinusb.hid as hid
 import ctypes
+import sys
 import threading
 import time
 import json
 import os
 import math
 
-from device_config import load_device_ids
+from device_config import (
+    find_config_interface, load_device_ids, load_protocol, resolve_config_path,
+)
 
 # ── Config ──────────────────────────────────────────────────────────
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "key_config.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Pick the config that matches the plugged-in keyboard (key_config.json or devices/*.json).
+_CONNECTED = {(d.vendor_id, d.product_id) for d in hid.find_all_hid_devices()}
+CONFIG_PATH = resolve_config_path(BASE_DIR, _CONNECTED)
 GAMEPAD_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "gamepad_config.json")
 
 VID, PID, DEVICE_NAME = load_device_ids(CONFIG_PATH)
-ENABLE_CMD = [0x1B, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE3] + [0x00] * 56
-DISABLE_CMD = [0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE4] + [0x00] * 56
+DEVICE_KEY = f"{VID:04X}:{PID:04X}"
+PROTOCOL = load_protocol(CONFIG_PATH)
+ENABLE_CMD = PROTOCOL["enable_cmd"]
+DISABLE_CMD = PROTOCOL["disable_cmd"]
+REPORT_ID = PROTOCOL["report_id"]
+PREFIX = PROTOCOL["prefix"]
+BYTE_LO = PROTOCOL["analog_byte_lo"]
+BYTE_HI = PROTOCOL["analog_byte_hi"]
+KEY_ID_BYTE = PROTOCOL["key_id_byte"]
 
 hid_dll = ctypes.WinDLL('hid.dll')
 kernel32 = ctypes.WinDLL('kernel32.dll')
 
-ANALOG_MAX = 350.0  # max raw value from keyboard
+winmm = ctypes.WinDLL('winmm.dll')
+
+# Gamepad timing: the worker thread wakes on every HID report, and at least
+# every IDLE_TICK so smoothing can settle after the last report.
+SMOOTHING_REF_DT = 1.0 / 120.0   # smoothing values are tuned for 120 Hz steps
+IDLE_TICK = 0.004                # max wait between updates without reports
+MIN_UPDATE_INTERVAL = 0.001      # cap at ~1000 updates/s towards ViGEm
+
+ANALOG_MAX = float(PROTOCOL["analog_max"])  # max raw value from keyboard (350 on X68PRO HE, 730 on X68HE)
 
 # Modes
 MODE_HYBRID = "hybrid"           # Only left stick, KB+mouse pass through
@@ -86,7 +107,7 @@ DEFAULT_SETTINGS = {
     "sensitivity_curve": 1.0,      # 1=linear, <1=more sensitive at start, >1=less sensitive
     "trigger_threshold": 0.15,     # analog threshold to consider trigger "pressed"
     "button_threshold": 0.15,      # analog threshold for digital button press
-    "analog_max_override": 350,    # override max analog value
+    "analog_max_override": ANALOG_MAX,  # override max analog value
 }
 
 
@@ -95,14 +116,16 @@ class KeyboardState:
     def __init__(self, key_mapping):
         self.key_mapping = key_mapping  # key_label -> key_id
         self.id_to_key = {v: k for k, v in key_mapping.items()}
-        self.values = {}  # key_label -> raw analog (0-350)
+        self.values = {}  # key_label -> raw analog (0-ANALOG_MAX)
         self.lock = threading.Lock()
+        self.changed = threading.Event()  # set on every new analog value
 
     def update(self, key_id, analog_value):
         key_label = self.id_to_key.get(key_id)
         if key_label:
             with self.lock:
                 self.values[key_label] = analog_value
+            self.changed.set()
 
     def get(self, key_label):
         with self.lock:
@@ -133,11 +156,14 @@ class SmoothedAxis:
     def __init__(self):
         self.value = 0.0
 
-    def update(self, target, smoothing):
+    def update(self, target, smoothing, dt):
+        """Move towards target. The result depends on elapsed time, not on
+        how often update() runs: smoothing is the share kept per 1/120 s."""
         if smoothing <= 0:
             self.value = target
         else:
-            self.value += (target - self.value) * (1.0 - smoothing)
+            keep = math.pow(smoothing, dt / SMOOTHING_REF_DT)
+            self.value += (target - self.value) * (1.0 - keep)
         return self.value
 
 
@@ -152,7 +178,7 @@ class VirtualGamepad:
         self.lt = SmoothedAxis()
         self.rt = SmoothedAxis()
 
-    def update(self, kb_state, bindings, settings):
+    def update(self, kb_state, bindings, settings, dt):
         smoothing = settings.get("smoothing", 0.3)
         mode = settings.get("mode", MODE_HYBRID)
 
@@ -171,8 +197,8 @@ class VirtualGamepad:
             raw_lx /= mag
             raw_ly /= mag
 
-        lx_val = self.lx.update(raw_lx, smoothing)
-        ly_val = self.ly.update(raw_ly, smoothing)
+        lx_val = self.lx.update(raw_lx, smoothing, dt)
+        ly_val = self.ly.update(raw_ly, smoothing, dt)
 
         self.pad.left_joystick_float(x_value_float=lx_val, y_value_float=ly_val)
 
@@ -194,15 +220,15 @@ class VirtualGamepad:
                 raw_rx /= mag
                 raw_ry /= mag
 
-            rx_val = self.rx.update(raw_rx, smoothing)
-            ry_val = self.ry.update(raw_ry, smoothing)
+            rx_val = self.rx.update(raw_rx, smoothing, dt)
+            ry_val = self.ry.update(raw_ry, smoothing, dt)
             self.pad.right_joystick_float(x_value_float=rx_val, y_value_float=ry_val)
 
             # ── Triggers (analog) ──
             lt_raw = kb_state.get_normalized(bindings.get("left_trigger", ""), settings)
             rt_raw = kb_state.get_normalized(bindings.get("right_trigger", ""), settings)
-            lt_val = self.lt.update(lt_raw, smoothing)
-            rt_val = self.rt.update(rt_raw, smoothing)
+            lt_val = self.lt.update(lt_raw, smoothing, dt)
+            rt_val = self.rt.update(rt_raw, smoothing, dt)
             self.pad.left_trigger_float(value_float=lt_val)
             self.pad.right_trigger_float(value_float=rt_val)
 
@@ -234,30 +260,17 @@ class VirtualGamepad:
             dpad_left = kb_state.get_normalized(bindings.get("dpad_left", ""), settings) > btn_thresh
             dpad_right = kb_state.get_normalized(bindings.get("dpad_right", ""), settings) > btn_thresh
 
-            if dpad_up and dpad_right:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
-            elif dpad_up and dpad_left:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
-            elif dpad_down and dpad_right:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
-            elif dpad_down and dpad_left:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
-            elif dpad_up:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
-            elif dpad_down:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
-            elif dpad_left:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
-            elif dpad_right:
-                self.pad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
-            else:
-                for dp in [vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
-                           vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT]:
-                    self.pad.release_button(button=dp)
+            # Each direction is set on its own, so a released one never stays pressed.
+            for pressed, xbutton in (
+                (dpad_up, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP),
+                (dpad_down, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN),
+                (dpad_left, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT),
+                (dpad_right, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT),
+            ):
+                if pressed:
+                    self.pad.press_button(button=xbutton)
+                else:
+                    self.pad.release_button(button=xbutton)
 
         self.pad.update()
         return lx_val, ly_val, rx_val, ry_val, lt_val, rt_val
@@ -296,7 +309,10 @@ class GamepadApp:
         self._init_hid()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self._gamepad_loop()
+        self.pad_lock = threading.Lock()  # guards self.gamepad between threads
+        winmm.timeBeginPeriod(1)  # 1 ms timer resolution instead of 15.6 ms
+        self.worker = threading.Thread(target=self._gamepad_worker, daemon=True)
+        self.worker.start()
         self._ui_update_loop()
 
     def _load_key_config(self):
@@ -311,6 +327,9 @@ class GamepadApp:
                 cfg = json.load(f)
             bindings = cfg.get("bindings", DEFAULT_BINDINGS)
             settings = {**DEFAULT_SETTINGS, **cfg.get("settings", {})}
+            # A saved Analog Max belongs to the keyboard it was tuned on.
+            if settings.get("analog_max_device") != DEVICE_KEY:
+                settings["analog_max_override"] = ANALOG_MAX
         else:
             bindings = dict(DEFAULT_BINDINGS)
             settings = dict(DEFAULT_SETTINGS)
@@ -319,6 +338,7 @@ class GamepadApp:
     def _save_gamepad_config(self):
         # Sync mode from UI
         self.settings["mode"] = self.mode_var.get()
+        self.settings["analog_max_device"] = DEVICE_KEY
         cfg = {"bindings": self.bindings, "settings": self.settings}
         with open(GAMEPAD_CONFIG_PATH, 'w') as f:
             json.dump(cfg, f, indent=2)
@@ -449,7 +469,7 @@ class GamepadApp:
             ("sensitivity_curve", "Sensitivity", 0.2, 3.0, self.settings["sensitivity_curve"], True),
             ("button_threshold", "Btn Threshold", 0.01, 0.5, self.settings["button_threshold"], False),
             ("trigger_threshold", "Trig Threshold", 0.01, 0.5, self.settings["trigger_threshold"], False),
-            ("analog_max_override", "Analog Max", 100, 500, self.settings["analog_max_override"], True),
+            ("analog_max_override", "Analog Max", 100, max(500, round(ANALOG_MAX * 1.5)), self.settings["analog_max_override"], True),
         ]
 
         for key, label, min_v, max_v, default, show_hybrid in slider_defs:
@@ -580,16 +600,13 @@ class GamepadApp:
         kbd_devs = [d for d in devices if d.vendor_id == VID and d.product_id == PID]
 
         for d in kbd_devs:
-            if 'mi_02' in d.device_path:
-                self.config_path = d.device_path
-
-        for d in kbd_devs:
             try:
                 d.open()
                 d.set_raw_data_handler(self._hid_handler)
                 self.opened_devices.append(d)
             except:
                 pass
+        self.config_path = find_config_interface(self.opened_devices)
 
         if self.opened_devices:
             self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)", fg="#ffcc00")
@@ -611,10 +628,12 @@ class GamepadApp:
         return bool(r)
 
     def _hid_handler(self, data):
-        if len(data) < 5 or data[0] != 5 or data[1] != 0x1B:
+        if len(data) <= max(BYTE_LO, BYTE_HI, KEY_ID_BYTE):
             return
-        analog = data[2] + data[3] * 256
-        key_id = data[4]
+        if data[0] != REPORT_ID or data[1] != PREFIX:
+            return
+        analog = data[BYTE_LO] + data[BYTE_HI] * 256
+        key_id = data[KEY_ID_BYTE]
         self.kb_state.update(key_id, analog)
 
     def _toggle_active(self):
@@ -631,38 +650,57 @@ class GamepadApp:
 
         # Create gamepad
         try:
-            self.gamepad = VirtualGamepad()
+            gamepad = VirtualGamepad()
         except Exception as e:
             self.status_label.config(text=f"ViGEm ERROR: {e}", fg="#ff4444")
             return
 
-        self.active = True
+        with self.pad_lock:
+            self.gamepad = gamepad
+            self.active = True
         self.status_label.config(text="GAMEPAD ACTIVE", fg="#00ff88")
         self.toggle_btn.config(text="DEACTIVATE", bg="#cc2222")
 
     def _deactivate(self):
-        self.active = False
+        with self.pad_lock:
+            self.active = False
+            gamepad, self.gamepad = self.gamepad, None
         self._send_feature(DISABLE_CMD)
 
-        if self.gamepad:
+        if gamepad:
             # Reset controller state
-            self.gamepad.pad.reset()
-            self.gamepad.pad.update()
-            del self.gamepad.pad
-            self.gamepad = None
+            gamepad.pad.reset()
+            gamepad.pad.update()
+            del gamepad.pad
 
         self.status_label.config(text="GAMEPAD OFF", fg="#ffcc00")
         self.toggle_btn.config(text="ACTIVATE GAMEPAD", bg="#00aa55")
 
-    def _gamepad_loop(self):
-        """Update gamepad at ~120Hz."""
-        if self.active and self.gamepad:
-            vals = self.gamepad.update(self.kb_state, self.bindings, self.settings)
-            self.lx_display, self.ly_display = vals[0], vals[1]
-            self.rx_display, self.ry_display = vals[2], vals[3]
-            self.lt_display, self.rt_display = vals[4], vals[5]
+    def _gamepad_worker(self):
+        """Send the gamepad state as soon as a HID report arrives.
 
-        self.root.after(8, self._gamepad_loop)  # ~120Hz
+        Runs outside the Tk loop, so the GUI does not add delay or jitter.
+        Never touches Tk widgets: it only writes the *_display values.
+        """
+        changed = self.kb_state.changed
+        last = time.perf_counter()
+        while self.running:
+            changed.wait(IDLE_TICK)
+            changed.clear()
+            now = time.perf_counter()
+            dt = now - last
+            last = now
+            with self.pad_lock:
+                if self.active and self.gamepad:
+                    vals = self.gamepad.update(self.kb_state, self.bindings, self.settings, dt)
+                    self.lx_display, self.ly_display = vals[0], vals[1]
+                    self.rx_display, self.ry_display = vals[2], vals[3]
+                    self.lt_display, self.rt_display = vals[4], vals[5]
+            # Reports can arrive faster than 1 kHz: merge them instead of
+            # sending one ViGEm update each.
+            spare = MIN_UPDATE_INTERVAL - (time.perf_counter() - now)
+            if spare > 0:
+                time.sleep(spare)
 
     def _ui_update_loop(self):
         """Update UI at ~30fps."""
@@ -754,8 +792,10 @@ class GamepadApp:
 
     def _on_close(self):
         self.running = False
+        self.worker.join(timeout=0.5)
         if self.active:
             self._deactivate()
+        winmm.timeEndPeriod(1)
         for d in self.opened_devices:
             try:
                 d.close()
@@ -765,6 +805,9 @@ class GamepadApp:
 
 
 def main():
+    # The HID, gamepad and Tk threads share the GIL. A 1 ms switch interval
+    # (default 5 ms) keeps a busy Tk redraw from delaying a gamepad update.
+    sys.setswitchinterval(0.001)
     root = tk.Tk()
     app = GamepadApp(root)
     root.mainloop()

@@ -10,7 +10,7 @@
 
 This project reverse engineers the vendor-specific HID protocol of Hall Effect keyboards to extract real-time 16-bit analog key travel data, then feeds it into a virtual Xbox 360 controller via ViGEmBus. The result is **true analog stick input from WASD keys** -- not binary on/off, but smooth, pressure-sensitive movement proportional to how far you press each key.
 
-The **Attack Shark X68PRO HE** is fully supported. Support for other Attack Shark HE models is in development: see [Supported Devices](#supported-devices).
+The **Attack Shark X68PRO HE** is fully supported. The **Attack Shark X68HE** has a ready config, built from a user capture, and is waiting for the user's confirmation ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)). Other Attack Shark HE models are in development: see [Supported Devices](#supported-devices).
 
 ## Features
 
@@ -28,7 +28,8 @@ The **Attack Shark X68PRO HE** is fully supported. Support for other Attack Shar
 - **Interactive key mapper** -- Visual tool to map (or remap) every physical key to its analog ID
 - **Guided capture page** -- Browser page that collects the data needed to support a new keyboard ([details](#help-add-your-keyboard))
 - **WebHID interceptor** -- JavaScript snippet for capturing the keyboard's protocol traffic in the browser
-- **120 Hz update rate** -- Gamepad state refreshed at ~120 Hz for low-latency response
+- **Low latency, low jitter** -- A dedicated thread updates the gamepad on every analog report (up to ~1000 updates/s), outside the GUI loop. See [Latency](#latency).
+- **Automatic model detection** -- Both apps load the config of the keyboard that is plugged in, from `key_config.json` or the `devices/` folder
 - **One-click launcher** -- `run.vbs` to start the app with a double-click, no terminal needed
 
 ## How It Works
@@ -50,7 +51,7 @@ Once enabled, the keyboard streams **Input Reports** (Report ID `0x05`) for ever
 | 3 | Analog value (high byte) |
 | 4 | Key ID (unique per physical key) |
 
-The analog value is a 16-bit unsigned integer ranging from **0** (key released) to approximately **350** (key fully depressed). This project reads these reports, normalizes the values, applies deadzone and sensitivity curves, and maps them to a virtual Xbox 360 controller created through ViGEmBus.
+The analog value is a 16-bit unsigned integer ranging from **0** (key released) to the model's maximum: about **350** on the X68PRO HE and **730** on the X68HE. Each config stores this value as `analog_max`. This project reads these reports, normalizes the values, applies deadzone and sensitivity curves, and maps them to a virtual Xbox 360 controller created through ViGEmBus.
 
 > The protocol was discovered through reverse engineering using HID descriptor analysis, raw USB sniffing, and a custom WebHID interceptor. Full technical documentation is available in [TECHNICAL.md](TECHNICAL.md).
 
@@ -58,7 +59,7 @@ The analog value is a 16-bit unsigned integer ranging from **0** (key released) 
 
 - **OS:** Windows 10 or later (uses native Windows HID API via ctypes)
 - **Python:** 3.10 or later
-- **Hardware:** Attack Shark X68PRO HE keyboard (Hall Effect variant). Other models are in development, see [Supported Devices](#supported-devices).
+- **Hardware:** Attack Shark X68PRO HE keyboard (Hall Effect variant). The X68HE is waiting for confirmation and other models are in development, see [Supported Devices](#supported-devices).
 - **ViGEmBus driver:** Required for virtual Xbox 360 controller emulation
   - Download from [ViGEmBus releases](https://github.com/nefarius/ViGEmBus/releases)
 
@@ -153,11 +154,12 @@ Created automatically when you save settings from the virtual gamepad GUI. Conta
 |---------|-------|---------|-------------|
 | `mode` | `hybrid` / `full_controller` | `hybrid` | Operating mode (see Usage section above) |
 | `deadzone` | 0.00 -- 0.50 | 0.05 | Values below this threshold are treated as zero |
-| `smoothing` | 0.00 -- 0.95 | 0.30 | Exponential moving average factor (higher = smoother but more latent) |
+| `smoothing` | 0.00 -- 0.95 | 0.30 | Share of the previous value kept every 1/120 s (higher = smoother but more latent). Independent of the update rate |
 | `sensitivity_curve` | 0.20 -- 3.00 | 1.00 | Response curve exponent (1.0 = linear, <1 = more sensitive at low travel, >1 = less sensitive at low travel) |
 | `button_threshold` | 0.01 -- 0.50 | 0.15 | Normalized analog value required to register a digital button press (Full Controller only) |
 | `trigger_threshold` | 0.01 -- 0.50 | 0.15 | Normalized analog value required to register a trigger press (Full Controller only) |
-| `analog_max_override` | 100 -- 500 | 350 | Maximum expected raw analog value from the keyboard |
+| `analog_max_override` | 100 -- 1.5 × `analog_max` (at least 500) | `analog_max` of the connected model | Maximum expected raw analog value from the keyboard |
+| `analog_max_device` | -- | set on save | VID:PID of the keyboard the Analog Max was set on. With another keyboard the value from its config is used |
 
 ## Default Gamepad Layout
 
@@ -209,14 +211,15 @@ All bindings can be changed through the GUI settings panel or by editing `gamepa
 
 | Device | Status |
 |--------|--------|
-| Attack Shark X68PRO HE | Confirmed working |
+| Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
+| Attack Shark X68HE (PID `0x502D`) | Config ready, waiting for user confirmation ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Attack Shark X98 HE (PID `0x5029`) | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
 
 If your keyboard uses the same Sonix chipset (VID `0x3151`) and exposes a similar vendor-specific HID interface, it is likely compatible. Run `key_mapper_gui.py` to map the keys for your specific model.
 
-Both apps read the VID and PID from the `device` section of `key_config.json`. If the capture page below produced a `key_config.json` for your model, copy it into the project folder to replace the included one. No code changes are needed.
+At startup both apps look for the config of the keyboard that is plugged in. They check `key_config.json` first, then every file in the `devices/` folder, and use the first one whose VID and PID match. The config sets the device IDs, the analog commands and the analog range (`analog_max`, 350 on the X68PRO HE and 730 on the X68HE). To add a model, save the `key_config.json` produced by the capture page as `devices/<model>.json`. No code changes are needed.
 
 ### Help add your keyboard
 
@@ -229,15 +232,26 @@ If you own a Hall Effect keyboard that is not in the table, you can send the dat
 
 The page only reads the keyboard. On Attack Shark / Sonix keyboards (VID `0x3151`) it also asks permission to send the same analog-mode command used by this project, and turns it off before you leave. It sends no commands to keyboards from other vendors. To run it offline, download the `tools/capture/` folder and open `index.html`.
 
+## Latency
+
+The gamepad is not updated by the GUI. A dedicated thread waits for analog reports and updates the virtual controller as soon as one arrives:
+
+- **Report to controller:** about 0.05 ms median, about 1 ms at the 99th percentile in a simulated test. Earlier versions updated from the GUI loop every 8–16 ms.
+- **Update cap:** about 1000 updates per second. Faster reports are merged into one update.
+- **Idle tick:** at least one update every 4 ms, so smoothing settles after the last key event.
+- **Windows timer:** the app sets the system timer resolution to 1 ms while it runs and restores it on exit.
+
+These numbers come from a test with simulated HID and ViGEm devices. Measurements on real hardware are welcome in the issues.
+
 ## Troubleshooting
 
 **The keyboard is not detected**
 - Ensure the keyboard is connected via USB (wireless mode does not expose the analog HID interface).
 - Check that no other application has exclusive access to the device (close the manufacturer's software).
-- Verify the VID/PID matches (`0x3151` / `0x5030`) using Device Manager or a HID enumeration tool.
+- Verify that the VID/PID shown in Device Manager matches a config in `key_config.json` or `devices/` (for example `0x3151` / `0x5030` for the X68PRO HE, `0x3151` / `0x502D` for the X68HE).
 
 **"ENABLE FAILED" when activating the gamepad**
-- The config interface (`mi_02`) could not be found or opened. Try unplugging and reconnecting the keyboard.
+- The config interface (usage page `0xFFFF`, usage `0x0002`, usually `mi_02`) could not be found or opened. Try unplugging and reconnecting the keyboard.
 - Run the application as Administrator if access is denied.
 
 **"ViGEm ERROR" when activating**
@@ -245,8 +259,12 @@ The page only reads the keyboard. On Attack Shark / Sonix keyboards (VID `0x3151
 
 **Stick input feels twitchy or too sensitive**
 - Increase the **Deadzone** slider to filter out small noise near the resting position.
-- Increase **Smoothing** to dampen rapid fluctuations (at the cost of slight input delay).
+- Increase **Smoothing** to dampen rapid fluctuations (at the cost of slight input delay). Smoothing depends on elapsed time, so it feels the same at any update rate.
 - Raise the **Sensitivity Curve** above 1.0 to make the lower end of key travel less responsive.
+
+**The stick reaches full deflection with the key only half pressed, or never reaches it**
+- The **Analog Max** value does not match the keyboard. The app takes it from the config of the connected model (`analog_max`). Move the **Analog Max** slider to the highest value the key reaches.
+- A saved Analog Max applies only to the keyboard it was set on. With a different keyboard the app uses the value from the config.
 
 **Some keys are not registering**
 - Run `key_mapper_gui.py` and verify all keys are mapped. Use **FREE MODE** to test individual keys.
@@ -266,8 +284,9 @@ The page only reads the keyboard. On Attack Shark / Sonix keyboards (VID `0x3151
 he-analog-gamepad/
 ├── virtual_gamepad.py      # Main application -- virtual Xbox 360 controller with GUI
 ├── key_mapper_gui.py       # Interactive key mapping tool
-├── device_config.py        # Reads VID/PID from key_config.json
+├── device_config.py        # Picks the config for the connected keyboard, reads IDs and protocol
 ├── key_config.json         # Complete key mapping (67 keys, generated by mapper)
+├── devices/                # Configs for other models (one JSON per keyboard)
 ├── gamepad_config.json     # Gamepad bindings and settings (auto-generated)
 ├── intercept_webhid.js     # Browser WebHID traffic interceptor
 ├── tools/capture/          # Guided WebHID capture page for new keyboards

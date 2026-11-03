@@ -14,13 +14,23 @@ import time
 import json
 import os
 
-from device_config import load_device_ids
+from device_config import (
+    find_config_interface, load_device_ids, load_protocol, resolve_config_path,
+)
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "key_config.json")
+# Pick the config that matches the plugged-in keyboard (key_config.json or devices/*.json).
+_CONNECTED = {(d.vendor_id, d.product_id) for d in hid.find_all_hid_devices()}
+CONFIG_PATH = resolve_config_path(os.path.dirname(os.path.abspath(__file__)), _CONNECTED)
 VID, PID, DEVICE_NAME = load_device_ids(CONFIG_PATH)
+PROTOCOL = load_protocol(CONFIG_PATH)
 
-ENABLE_CMD = [0x1B, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE3] + [0x00] * 56
-DISABLE_CMD = [0x1B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE4] + [0x00] * 56
+ENABLE_CMD = PROTOCOL["enable_cmd"]
+DISABLE_CMD = PROTOCOL["disable_cmd"]
+REPORT_ID = PROTOCOL["report_id"]
+PREFIX = PROTOCOL["prefix"]
+BYTE_LO = PROTOCOL["analog_byte_lo"]
+BYTE_HI = PROTOCOL["analog_byte_hi"]
+KEY_ID_BYTE = PROTOCOL["key_id_byte"]
 
 hid_dll = ctypes.WinDLL('hid.dll')
 kernel32 = ctypes.WinDLL('kernel32.dll')
@@ -70,6 +80,7 @@ class KeyMapperGUI:
         self.latest_key_id = None
         self.latest_analog = 0
         self.peak_analog = 0
+        self.max_peak = 0  # highest value seen this session
         self.data_lock = threading.Lock()
         self.last_event_time = 0
 
@@ -194,10 +205,6 @@ class KeyMapperGUI:
             self.status_label.config(text=f"ERRORE: {DEVICE_NAME} non trovata!", fg="#ff4444")
             return
 
-        for d in kbd_devs:
-            if 'mi_02' in d.device_path:
-                self.config_path = d.device_path
-
         # Open all for listening
         for d in kbd_devs:
             try:
@@ -206,6 +213,7 @@ class KeyMapperGUI:
                 self.opened_devices.append(d)
             except:
                 pass
+        self.config_path = find_config_interface(self.opened_devices)
 
         n = len(self.opened_devices)
         self.status_label.config(
@@ -244,23 +252,17 @@ class KeyMapperGUI:
 
     def _hid_handler(self, data):
         """Handle incoming HID data."""
-        if len(data) < 5:
+        if len(data) <= max(BYTE_LO, BYTE_HI, KEY_ID_BYTE):
             return
-        report_id = data[0]
-        if report_id != 5:
-            return
-
-        prefix = data[1]
-        if prefix != 0x1B:
+        if data[0] != REPORT_ID or data[1] != PREFIX:
             return
 
-        analog_lo = data[2]
-        analog_hi = data[3]
-        key_id = data[4]
-        analog_value = analog_lo + analog_hi * 256
+        analog_value = data[BYTE_LO] + data[BYTE_HI] * 256
+        key_id = data[KEY_ID_BYTE]
 
         with self.data_lock:
             self.latest_analog = analog_value
+            self.max_peak = max(self.max_peak, analog_value)
             if analog_value > 0:
                 self.latest_key_id = key_id
                 self.last_event_time = time.time()
@@ -476,12 +478,12 @@ class KeyMapperGUI:
             "protocol": {
                 "enable_cmd": ENABLE_CMD,
                 "disable_cmd": DISABLE_CMD,
-                "report_id": 5,
-                "prefix": 0x1B,
-                "analog_byte_lo": 2,
-                "analog_byte_hi": 3,
-                "key_id_byte": 4,
-                "analog_max": 350,
+                "report_id": REPORT_ID,
+                "prefix": PREFIX,
+                "analog_byte_lo": BYTE_LO,
+                "analog_byte_hi": BYTE_HI,
+                "key_id_byte": KEY_ID_BYTE,
+                "analog_max": self.max_peak or PROTOCOL["analog_max"],
                 "note": "pywinusb byte indices (byte[0]=report_id)"
             },
             "key_mapping": self.mapping,
@@ -490,13 +492,13 @@ class KeyMapperGUI:
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        path = os.path.join(os.path.dirname(__file__), "key_config.json")
+        path = CONFIG_PATH
         with open(path, 'w') as f:
             json.dump(config, f, indent=2)
 
         mapped = len(self.mapping)
         self.instr_label.config(
-            text=f"Salvato in key_config.json ({mapped} tasti)"
+            text=f"Salvato in {os.path.basename(path)} ({mapped} tasti)"
         )
         messagebox.showinfo("Saved", f"Config saved to:\n{path}\n\n{mapped} keys mapped.")
         print(f"\nConfig saved: {path}", flush=True)
@@ -506,7 +508,7 @@ class KeyMapperGUI:
 
     def _load_existing(self):
         """Load existing mapping if available."""
-        path = os.path.join(os.path.dirname(__file__), "key_config.json")
+        path = CONFIG_PATH
         if os.path.exists(path):
             try:
                 with open(path) as f:
