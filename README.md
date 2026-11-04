@@ -10,7 +10,7 @@
 
 This project reverse engineers the vendor-specific HID protocol of Hall Effect keyboards to extract real-time 16-bit analog key travel data, then feeds it into a virtual Xbox 360 controller via ViGEmBus. The result is **true analog stick input from WASD keys** -- not binary on/off, but smooth, pressure-sensitive movement proportional to how far you press each key.
 
-The **Attack Shark X68PRO HE** is fully supported. The **Attack Shark X68HE** has a ready config, built from a user capture, and is waiting for the user's confirmation ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)). Other Attack Shark HE models are in development: see [Supported Devices](#supported-devices).
+The **Attack Shark X68PRO HE** and **Attack Shark X68HE** are fully supported. Other Attack Shark HE models are in development: see [Supported Devices](#supported-devices).
 
 ## Features
 
@@ -59,7 +59,7 @@ The analog value is a 16-bit unsigned integer ranging from **0** (key released) 
 
 - **OS:** Windows 10 or later (uses native Windows HID API via ctypes)
 - **Python:** 3.10 or later
-- **Hardware:** Attack Shark X68PRO HE keyboard (Hall Effect variant). The X68HE is waiting for confirmation and other models are in development, see [Supported Devices](#supported-devices).
+- **Hardware:** Attack Shark X68PRO HE or X68HE keyboard (Hall Effect variant). Other models are in development, see [Supported Devices](#supported-devices).
 - **ViGEmBus driver:** Required for virtual Xbox 360 controller emulation
   - Download from [ViGEmBus releases](https://github.com/nefarius/ViGEmBus/releases)
 
@@ -212,7 +212,7 @@ All bindings can be changed through the GUI settings panel or by editing `gamepa
 | Device | Status |
 |--------|--------|
 | Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
-| Attack Shark X68HE (PID `0x502D`) | Config ready, waiting for user confirmation ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
+| Attack Shark X68HE (PID `0x502D`) | Confirmed working ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Attack Shark X98 HE (PID `0x5029`) | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
