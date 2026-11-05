@@ -10,7 +10,7 @@
 
 This project reverse engineers the vendor-specific HID protocol of Hall Effect keyboards to extract real-time 16-bit analog key travel data, then feeds it into a virtual Xbox 360 controller via ViGEmBus. The result is **true analog stick input from WASD keys** -- not binary on/off, but smooth, pressure-sensitive movement proportional to how far you press each key.
 
-The **Attack Shark X68PRO HE** and **Attack Shark X68HE** are fully supported. Other Attack Shark HE models are in development: see [Supported Devices](#supported-devices).
+The **Attack Shark X68PRO HE** and **Attack Shark X68HE** are fully supported. The **Attack Shark X98 HE** has a ready config and is waiting for user confirmation. Other Attack Shark HE models are in development: see [Supported Devices](#supported-devices).
 
 ## Features
 
@@ -51,7 +51,7 @@ Once enabled, the keyboard streams **Input Reports** (Report ID `0x05`) for ever
 | 3 | Analog value (high byte) |
 | 4 | Key ID (unique per physical key) |
 
-The analog value is a 16-bit unsigned integer ranging from **0** (key released) to the model's maximum: about **350** on the X68PRO HE and **730** on the X68HE. Each config stores this value as `analog_max`. This project reads these reports, normalizes the values, applies deadzone and sensitivity curves, and maps them to a virtual Xbox 360 controller created through ViGEmBus.
+The analog value is a 16-bit unsigned integer ranging from **0** (key released) to the model's maximum: about **350** on the X68PRO HE, **730** on the X68HE and **700** on the X98 HE. Each config stores this value as `analog_max`. This project reads these reports, normalizes the values, applies deadzone and sensitivity curves, and maps them to a virtual Xbox 360 controller created through ViGEmBus.
 
 > The protocol was discovered through reverse engineering using HID descriptor analysis, raw USB sniffing, and a custom WebHID interceptor. Full technical documentation is available in [TECHNICAL.md](TECHNICAL.md).
 
@@ -214,12 +214,12 @@ All bindings can be changed through the GUI settings panel or by editing `gamepa
 | Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
 | Attack Shark X68HE (PID `0x502D`) | Confirmed working ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
-| Attack Shark X98 HE (PID `0x5029`) | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
+| Attack Shark X98 HE (PID `0x5029`) | Config ready, waiting for user confirmation ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
 
-If your keyboard uses the same Sonix chipset (VID `0x3151`) and exposes a similar vendor-specific HID interface, it is likely compatible. Run `key_mapper_gui.py` to map the keys for your specific model.
+If your keyboard uses the same Sonix chipset (VID `0x3151`) and exposes a similar vendor-specific HID interface, it is likely compatible. Use the [capture page](#help-add-your-keyboard) to map the keys for your model. `key_mapper_gui.py` shows only the 65% layout, so it cannot map the extra keys of larger keyboards such as the X98 HE.
 
-At startup both apps look for the config of the keyboard that is plugged in. They check `key_config.json` first, then every file in the `devices/` folder, and use the first one whose VID and PID match. The config sets the device IDs, the analog commands and the analog range (`analog_max`, 350 on the X68PRO HE and 730 on the X68HE). To add a model, save the `key_config.json` produced by the capture page as `devices/<model>.json`. No code changes are needed.
+At startup both apps look for the config of the keyboard that is plugged in. They check `key_config.json` first, then every file in the `devices/` folder, and use the first one whose VID and PID match. The config sets the device IDs, the analog commands and the analog range (`analog_max`, 350 on the X68PRO HE, 730 on the X68HE and 700 on the X98 HE). To add a model, save the `key_config.json` produced by the capture page as `devices/<model>.json`. No code changes are needed.
 
 ### Help add your keyboard
 
