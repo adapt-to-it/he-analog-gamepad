@@ -16,7 +16,7 @@ Hall Effect keyboards measure how far you press each key. This app reads that va
 |--------|--------|
 | Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
 | Attack Shark X68HE (PID `0x502D`) | Confirmed working ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
-| Attack Shark X98 HE (PID `0x5029`) | Config ready, waiting for user confirmation ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
+| Attack Shark X98 HE (PID `0x5029`) | Confirmed working ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
 
