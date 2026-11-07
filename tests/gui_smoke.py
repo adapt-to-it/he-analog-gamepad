@@ -19,8 +19,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 # ── Stubs ──
+FEATURES = []  # feature reports "sent" to the keyboard
 ctypes.WinDLL = lambda name: types.SimpleNamespace(
-    timeBeginPeriod=lambda x: 0, timeEndPeriod=lambda x: 0)
+    timeBeginPeriod=lambda x: 0, timeEndPeriod=lambda x: 0,
+    CreateFileW=lambda *a: 1, CloseHandle=lambda h: 1,
+    HidD_SetFeature=lambda h, buf, n: FEATURES.append(buf._obj[1] & 0xFF) or 1)
 
 
 class FakeDevice:
@@ -135,6 +138,30 @@ saved = json.load(open(V.GAMEPAD_CONFIG_PATH)) if os.path.exists(V.GAMEPAD_CONFI
 check(abs(saved.get("settings", {}).get("deadzone", 0) - 0.2) < 1e-6, "slider change is saved automatically")
 check(saved.get("bindings", {}).get("btn_a") == "G", "binding change is saved automatically")
 check(saved.get("settings", {}).get("mode") == V.MODE_FULL, "mode is saved")
+
+# Quick binding: click, then press a key on the keyboard
+ids = app.key_mapping
+app.kb_state.update(ids["W"], 700)          # held before the capture: ignored
+app.bind_widgets["btn_y"].invoke()
+check(app.bind_vars["btn_y"].get() == "Press a key…", "binding shows the prompt while waiting")
+check(FEATURES[-1:] == [0x1B] and app.capture["enabled_here"], "analog mode enabled for the capture")
+pump(0.1)
+check(app.bindings["btn_y"] == "Q", "a key held before the click is ignored")
+app.kb_state.update(ids["H"], 200)          # light touch: below the press threshold
+pump(0.1)
+check(app.capture is not None, "a light touch does not bind")
+app.kb_state.update(ids["H"], 650)
+pump(0.1)
+check(app.bindings["btn_y"] == "H" and app.bind_vars["btn_y"].get() == "H", "pressed key is bound")
+check(app.capture is None, "capture ends after the press")
+pump(1.0)
+saved = json.load(open(V.GAMEPAD_CONFIG_PATH))
+check(saved["bindings"]["btn_y"] == "H", "captured binding is saved")
+app.kb_state.update(ids["W"], 0); app.kb_state.update(ids["H"], 0)
+app.bind_widgets["btn_x"].invoke()
+app.bind_widgets["btn_x"].invoke()          # second click cancels
+check(app.capture is None and app.bind_vars["btn_x"].get() == app.bindings["btn_x"],
+      "second click cancels the capture")
 
 # Reset
 app.reset_btn.invoke()

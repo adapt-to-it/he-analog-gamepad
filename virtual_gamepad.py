@@ -150,6 +150,11 @@ class KeyboardState:
         with self.lock:
             return self.values.get(key_label, 0)
 
+    def snapshot(self):
+        """Copy of all current raw values, label -> value."""
+        with self.lock:
+            return dict(self.values)
+
     def get_normalized(self, key_label, settings):
         """Get value normalized to 0.0-1.0 with deadzone and curve."""
         raw = self.get(key_label)
@@ -334,6 +339,7 @@ class GamepadApp:
 
         self.running = True
         self.active = False
+        self.capture = None  # quick-binding state, see _start_capture
 
         # Load configs
         self.key_mapping = self._load_key_config()
@@ -424,7 +430,8 @@ class GamepadApp:
         # ttk buttons: tk.Button ignores colors on macOS (native white button)
         for name, bg, fg, hover in (("Accent.TButton", p["accent"], p["bg"], p["text"]),
                                     ("Danger.TButton", p["field"], p["error"], p["border"]),
-                                    ("Flat.TButton", p["field"], p["text"], p["border"])):
+                                    ("Flat.TButton", p["field"], p["text"], p["border"]),
+                                    ("Capture.TButton", p["accent"], p["bg"], p["accent"])):
             style.configure(name, background=bg, foreground=fg, bordercolor=bg,
                             lightcolor=bg, darkcolor=bg, focuscolor=bg,
                             padding=(10, 4), relief="flat")
@@ -635,7 +642,6 @@ class GamepadApp:
         self.bind_vars = {}
         self.bind_widgets = {}
         self.bind_groups = []  # (group frame, shown in hybrid)
-        all_keys = sorted(self.key_mapping.keys())
 
         for row, (title, actions) in enumerate(BINDING_GROUPS):
             group = tk.Frame(bind_inner, bg=p["panel"])
@@ -652,13 +658,12 @@ class GamepadApp:
 
                 self.bindings.setdefault(action, DEFAULT_BINDINGS[action])
                 var = tk.StringVar(value=self.bindings[action])
-                combo = ttk.Combobox(f, textvariable=var, values=all_keys,
-                                     width=8, font=VALUE_FONT, state="readonly")
-                combo.pack(side=tk.LEFT, padx=2)
-                combo.bind("<<ComboboxSelected>>",
-                           lambda e, a=action, v=var: self._on_binding_change(a, v))
+                # Click, then press the key on the keyboard to bind it
+                btn = ttk.Button(f, textvariable=var, style="Flat.TButton", width=10,
+                                 command=lambda a=action: self._start_capture(a))
+                btn.pack(side=tk.LEFT, padx=2)
                 self.bind_vars[action] = var
-                self.bind_widgets[action] = combo
+                self.bind_widgets[action] = btn
 
             self.bind_groups.append((group, title == "Left stick"))
 
@@ -734,7 +739,70 @@ class GamepadApp:
         self._refresh_stick_titles()
         self._schedule_save()
 
+    # ── Quick binding: click a binding, then press a key ──
+    CAPTURE_TIMEOUT = 6.0     # seconds before the capture gives up
+    CAPTURE_PRESS = 0.5       # share of Analog Max that counts as a press
+
+    def _start_capture(self, action):
+        """Wait for the next key pressed on the HE keyboard and bind it to action."""
+        if self.capture:
+            done = self.capture["action"]
+            self._end_capture()
+            if done == action:  # second click on the same binding cancels
+                return
+        self.root.focus_set()  # keep Space/Enter from re-clicking the button
+        # Without the gamepad active the keyboard sends no analog reports
+        enabled_here = False
+        if not self.active:
+            if not self._send_feature(ENABLE_CMD):
+                self._flash_binding(action, "No analog")
+                return
+            enabled_here = True
+        limit = self.settings.get("analog_max_override", ANALOG_MAX) * 0.2
+        self.capture = {
+            "action": action,
+            "enabled_here": enabled_here,
+            "deadline": time.time() + self.CAPTURE_TIMEOUT,
+            # keys already held when the capture starts are ignored
+            "held": {k for k, v in self.kb_state.snapshot().items() if v > limit},
+        }
+        self.bind_vars[action].set("Press a key…")
+        self.bind_widgets[action].config(style="Capture.TButton")  # highlight the waiting binding
+        self._poll_capture()
+
+    def _poll_capture(self):
+        cap = self.capture
+        if not cap or not self.running:
+            return
+        press = self.settings.get("analog_max_override", ANALOG_MAX) * self.CAPTURE_PRESS
+        pressed = [k for k, v in self.kb_state.snapshot().items()
+                   if v >= press and k not in cap["held"]]
+        if pressed:
+            action = cap["action"]
+            self._end_capture()
+            self.bind_vars[action].set(pressed[0])
+            self._on_binding_change(action, self.bind_vars[action])
+        elif time.time() > cap["deadline"]:
+            self._end_capture()
+        else:
+            self.root.after(15, self._poll_capture)
+
+    def _end_capture(self):
+        """Stop the capture and show the current binding again."""
+        cap, self.capture = self.capture, None
+        if not cap:
+            return
+        if cap["enabled_here"] and not self.active:
+            self._send_feature(DISABLE_CMD)
+        self.bind_vars[cap["action"]].set(self.bindings[cap["action"]])
+        self.bind_widgets[cap["action"]].config(style="Flat.TButton")
+
+    def _flash_binding(self, action, text):
+        self.bind_vars[action].set(text)
+        self.root.after(1500, lambda: self.bind_vars[action].set(self.bindings[action]))
+
     def _reset_defaults(self):
+        self._end_capture()
         self.settings = dict(DEFAULT_SETTINGS)
         self.bindings = dict(DEFAULT_BINDINGS)
 
@@ -937,6 +1005,7 @@ class GamepadApp:
         canvas.create_rectangle(0, 0, bar_w, h, fill=PALETTE["accent"], outline="")
 
     def _on_close(self):
+        self._end_capture()
         self.running = False
         self.worker.join(timeout=0.5)
         if self.active:

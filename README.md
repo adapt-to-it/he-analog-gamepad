@@ -132,7 +132,7 @@ All inputs are mapped to the virtual Xbox controller.
 | Left Thumb Click | C | Digital (threshold) |
 | Right Thumb Click | V | Digital (threshold) |
 
-You can change every binding in the **Bindings** tab. Bindings are grouped by stick, triggers, buttons, D-pad and system; hybrid mode shows only the left stick.
+To change a binding, open the **Bindings** tab, click the binding and press the key on the keyboard. A light touch is ignored: press the key at least halfway. Click the same binding again to cancel; after 6 seconds without a key press the old binding stays. Bindings are grouped by stick, triggers, buttons, D-pad and system; hybrid mode shows only the left stick.
 
 ## Settings
 
