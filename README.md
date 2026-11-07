@@ -79,11 +79,11 @@ Double-click **`run.vbs`** in the project folder, or run from the terminal:
 python virtual_gamepad.py
 ```
 
-1. **Select a mode** from the dropdown in the top bar:
+1. **Select a mode** with the **Hybrid** / **Full controller** switch in the top bar. The top bar also shows the detected keyboard model:
    - **hybrid** (default) -- Only WASD sends left stick data. Keyboard and mouse keep working. Use it for games that accept gamepad and keyboard/mouse at the same time (for example Halo Infinite, GTA V, Battlefield).
    - **full_controller** -- All keys are mapped to Xbox buttons, sticks and triggers. Use it for games that don't accept mixed input.
 2. Click **ACTIVATE GAMEPAD**. Windows sees a standard Xbox 360 controller.
-3. Check the stick and trigger response in the live view, and adjust the sliders on the right panel if needed.
+3. Check the stick and trigger response in the live view, and adjust the sliders in the **Tuning** tab if needed.
 4. Click **DEACTIVATE** to turn off analog mode and remove the virtual controller.
 
 The keys are already mapped for every supported model. You don't need to run the key mapper.
@@ -132,11 +132,11 @@ All inputs are mapped to the virtual Xbox controller.
 | Left Thumb Click | C | Digital (threshold) |
 | Right Thumb Click | V | Digital (threshold) |
 
-You can change every binding in the GUI settings panel.
+You can change every binding in the **Bindings** tab. Bindings are grouped by stick, triggers, buttons, D-pad and system; hybrid mode shows only the left stick.
 
 ## Settings
 
-The sliders on the right panel change how the keys feel. The app saves them in `gamepad_config.json`, together with the bindings and the selected mode, and loads them at startup.
+The sliders in the **Tuning** tab change how the keys feel. Every change is saved automatically in `gamepad_config.json`, together with the bindings and the selected mode, and loaded at startup. **Reset to defaults** restores the default settings and bindings.
 
 | Setting | Range | Default | Description |
 |---------|-------|---------|-------------|

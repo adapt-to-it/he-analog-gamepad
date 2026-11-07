@@ -1,5 +1,5 @@
 """
-X68PRO HE - Interactive Key Mapper GUI
+HE keyboard - Interactive Key Mapper GUI
 Maps every physical key to its analog key_id.
 Saves a complete config JSON for the virtual gamepad.
 """
@@ -65,7 +65,7 @@ for row in KEYBOARD_LAYOUT:
 class KeyMapperGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("X68PRO HE - Key Mapper")
+        self.root.title(f"{DEVICE_NAME} - Key Mapper")
         self.root.configure(bg="#1a1a2e")
         self.root.resizable(True, True)
 

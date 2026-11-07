@@ -66,6 +66,25 @@ ANALOG_MAX = float(PROTOCOL["analog_max"])  # max raw value from keyboard (350 o
 MODE_HYBRID = "hybrid"           # Only left stick, KB+mouse pass through
 MODE_FULL = "full_controller"    # Everything mapped to Xbox controller
 
+# GUI colors: one accent, the rest neutral
+PALETTE = {
+    "bg": "#1e1f22",
+    "panel": "#2b2d31",
+    "field": "#383a40",
+    "border": "#3f4147",
+    "text": "#dbdee1",
+    "muted": "#949ba4",
+    "accent": "#5b8def",
+    "ok": "#3ba55d",
+    "warn": "#d29922",
+    "error": "#e5534b",
+    "canvas": "#18191c",
+    "grid": "#3f4147",
+}
+UI_FONT = ("Segoe UI", 9)
+TITLE_FONT = ("Segoe UI", 10, "bold")
+VALUE_FONT = ("Consolas", 9)  # numeric values only
+
 # Default gamepad bindings: keyboard_key -> gamepad_action
 DEFAULT_BINDINGS = {
     # Left stick (analog)
@@ -276,12 +295,41 @@ class VirtualGamepad:
         return lx_val, ly_val, rx_val, ry_val, lt_val, rt_val
 
 
+# Binding groups shown in the Bindings tab: (header, [(action, friendly name)])
+BINDING_GROUPS = [
+    ("Left stick", [
+        ("left_stick_up", "Up"), ("left_stick_down", "Down"),
+        ("left_stick_left", "Left"), ("left_stick_right", "Right"),
+    ]),
+    ("Right stick", [
+        ("right_stick_up", "Up"), ("right_stick_down", "Down"),
+        ("right_stick_left", "Left"), ("right_stick_right", "Right"),
+    ]),
+    ("Triggers", [
+        ("left_trigger", "Left trigger"), ("right_trigger", "Right trigger"),
+    ]),
+    ("Buttons", [
+        ("btn_a", "A"), ("btn_b", "B"), ("btn_x", "X"), ("btn_y", "Y"),
+        ("left_bumper", "Left bumper"), ("right_bumper", "Right bumper"),
+        ("btn_thumb_left", "Left thumb"), ("btn_thumb_right", "Right thumb"),
+    ]),
+    ("D-pad", [
+        ("dpad_up", "Up"), ("dpad_down", "Down"),
+        ("dpad_left", "Left"), ("dpad_right", "Right"),
+    ]),
+    ("System", [
+        ("btn_start", "Start"), ("btn_back", "Back"),
+    ]),
+]
+
+
 class GamepadApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("X68PRO HE → Xbox 360 Gamepad")
-        self.root.geometry("820x680")
-        self.root.configure(bg="#1a1a2e")
+        self.root.title(f"{DEVICE_NAME} → Xbox 360 Gamepad")
+        self.root.geometry("760x480")
+        self.root.minsize(700, 440)
+        self.root.configure(bg=PALETTE["bg"])
         self.root.resizable(True, True)
 
         self.running = True
@@ -304,7 +352,9 @@ class GamepadApp:
         self.ry_display = 0.0
         self.lt_display = 0.0
         self.rt_display = 0.0
+        self._save_job = None
 
+        self._apply_style()
         self._build_ui()
         self._init_hid()
 
@@ -343,259 +393,352 @@ class GamepadApp:
         with open(GAMEPAD_CONFIG_PATH, 'w') as f:
             json.dump(cfg, f, indent=2)
 
+    def _schedule_save(self):
+        # Debounce: write the config once the user has paused for 500 ms
+        if self._save_job:
+            self.root.after_cancel(self._save_job)
+        self._save_job = self.root.after(500, self._do_save)
+
+    def _do_save(self):
+        self._save_job = None
+        self._save_gamepad_config()
+        self.saved_label.config(text="Saved")
+        self.root.after(1500, lambda: self.saved_label.config(text=""))
+
+    def _apply_style(self):
+        p = PALETTE
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(".", background=p["panel"], foreground=p["text"], font=UI_FONT)
+        style.configure("TNotebook", background=p["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab", background=p["panel"], foreground=p["muted"],
+                        padding=(10, 4), borderwidth=0)
+        style.map("TNotebook.Tab",
+                  background=[("selected", p["field"])],
+                  foreground=[("selected", p["text"])])
+        style.configure("TScale", background=p["panel"], troughcolor=p["field"],
+                        bordercolor=p["panel"], lightcolor=p["panel"], darkcolor=p["panel"])
+        style.map("TScale", background=[("active", p["panel"])])
+        style.configure("TRadiobutton", background=p["panel"], foreground=p["text"], font=UI_FONT)
+        style.map("TRadiobutton",
+                  background=[("active", p["panel"])],
+                  indicatorcolor=[("selected", p["accent"]), ("!selected", p["field"])])
+        style.configure("TCombobox", fieldbackground=p["field"], background=p["panel"],
+                        foreground=p["text"], arrowcolor=p["muted"], bordercolor=p["border"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", p["field"])],
+                  foreground=[("readonly", p["text"])],
+                  selectbackground=[("readonly", p["field"])],
+                  selectforeground=[("readonly", p["text"])])
+        style.configure("TScrollbar", background=p["field"], troughcolor=p["canvas"],
+                        arrowcolor=p["muted"], bordercolor=p["canvas"])
+
     def _build_ui(self):
+        p = PALETTE
         # Prevent keyboard from triggering GUI
         self.root.bind_all('<space>', lambda e: 'break')
         self.root.bind_all('<Return>', lambda e: 'break')
 
         # ── Top bar ──
-        top = tk.Frame(self.root, bg="#16213e")
+        top = tk.Frame(self.root, bg=p["panel"])
         top.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        self.status_label = tk.Label(
-            top, text="DISCONNECTED", font=("Consolas", 13, "bold"),
-            fg="#ff4444", bg="#16213e"
+        connected = (VID, PID) in _CONNECTED
+        self.device_label = tk.Label(
+            top, text=f"{DEVICE_NAME} {'connected' if connected else 'not found'}",
+            font=TITLE_FONT, fg=p["ok"] if connected else p["error"], bg=p["panel"]
         )
-        self.status_label.pack(side=tk.LEFT, padx=10, pady=8)
+        self.device_label.pack(side=tk.LEFT, padx=10, pady=8)
 
+        self.status_label = tk.Label(
+            top, text="DISCONNECTED", font=TITLE_FONT, fg=p["error"], bg=p["panel"]
+        )
+        self.status_label.pack(side=tk.LEFT, padx=4, pady=8)
+
+        # Accent when off; panel with error text when on
         self.toggle_btn = tk.Button(
-            top, text="ACTIVATE GAMEPAD", font=("Consolas", 11, "bold"),
-            bg="#00aa55", fg="white", command=self._toggle_active, width=20
+            top, text="Activate", font=TITLE_FONT, relief=tk.FLAT,
+            bg=p["accent"], fg=p["bg"], activebackground=p["accent"],
+            command=self._toggle_active, width=14
         )
         self.toggle_btn.pack(side=tk.RIGHT, padx=10, pady=8)
 
         # Mode selector
-        mode_frame = tk.Frame(top, bg="#16213e")
+        mode_frame = tk.Frame(top, bg=p["panel"])
         mode_frame.pack(side=tk.RIGHT, padx=10, pady=8)
 
-        tk.Label(mode_frame, text="Mode:", font=("Consolas", 10, "bold"),
-                 fg="#ccc", bg="#16213e").pack(side=tk.LEFT, padx=(0, 5))
-
         self.mode_var = tk.StringVar(value=self.settings.get("mode", MODE_HYBRID))
-        self.mode_combo = ttk.Combobox(
-            mode_frame, textvariable=self.mode_var,
-            values=[MODE_HYBRID, MODE_FULL],
-            width=16, font=("Consolas", 10), state="readonly"
-        )
-        self.mode_combo.pack(side=tk.LEFT)
-        self.mode_combo.bind("<<ComboboxSelected>>", self._on_mode_change)
+        ttk.Radiobutton(
+            mode_frame, text="Hybrid", value=MODE_HYBRID, variable=self.mode_var,
+            command=lambda: self._set_mode(self.mode_var.get())
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Radiobutton(
+            mode_frame, text="Full controller", value=MODE_FULL, variable=self.mode_var,
+            command=lambda: self._set_mode(self.mode_var.get())
+        ).pack(side=tk.LEFT)
 
-        # Mode description
+        # Mode hint
         self.mode_desc = tk.Label(
-            self.root, text="", font=("Consolas", 9),
-            fg="#888", bg="#1a1a2e", anchor=tk.W
+            self.root, text="", font=UI_FONT, fg=p["muted"], bg=p["bg"], anchor=tk.W
         )
         self.mode_desc.pack(fill=tk.X, padx=16, pady=(0, 2))
 
         # ── Main area ──
-        main = tk.Frame(self.root, bg="#1a1a2e")
+        main = tk.Frame(self.root, bg=p["bg"])
         main.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        # Left: stick visualization
+        # Left: controller view
         self.viz_frame = tk.LabelFrame(
-            main, text=" CONTROLLER ", font=("Consolas", 10, "bold"),
-            fg="#00ccff", bg="#16213e"
+            main, text=" Controller ", font=TITLE_FONT, fg=p["text"], bg=p["panel"],
+            bd=0, highlightthickness=0
         )
         self.viz_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
 
         # Stick canvases side by side
-        self.sticks_frame = tk.Frame(self.viz_frame, bg="#16213e")
+        self.sticks_frame = tk.Frame(self.viz_frame, bg=p["panel"])
         self.sticks_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Left stick
-        ls_frame = tk.Frame(self.sticks_frame, bg="#16213e")
+        ls_frame = tk.Frame(self.sticks_frame, bg=p["panel"])
         ls_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(ls_frame, text="LEFT STICK (WASD)", font=("Consolas", 9, "bold"),
-                 fg="#888", bg="#16213e").pack()
-        self.left_canvas = tk.Canvas(ls_frame, bg="#0a0a1a", width=180, height=180,
+        self.ls_title = tk.Label(ls_frame, text=self._stick_title("LEFT", "left_stick"),
+                                 font=UI_FONT, fg=p["muted"], bg=p["panel"])
+        self.ls_title.pack()
+        self.left_canvas = tk.Canvas(ls_frame, bg=p["canvas"], width=150, height=150,
                                      highlightthickness=0)
         self.left_canvas.pack(padx=5, pady=5)
         self.ls_label = tk.Label(ls_frame, text="X: 0.00  Y: 0.00",
-                                 font=("Consolas", 9), fg="#00ff88", bg="#16213e")
+                                 font=VALUE_FONT, fg=p["text"], bg=p["panel"])
         self.ls_label.pack()
 
         # Right stick (container for show/hide)
-        self.rs_frame = tk.Frame(self.sticks_frame, bg="#16213e")
+        self.rs_frame = tk.Frame(self.sticks_frame, bg=p["panel"])
         self.rs_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(self.rs_frame, text="RIGHT STICK", font=("Consolas", 9, "bold"),
-                 fg="#888", bg="#16213e").pack()
-        self.right_canvas = tk.Canvas(self.rs_frame, bg="#0a0a1a", width=180, height=180,
+        self.rs_title = tk.Label(self.rs_frame, text=self._stick_title("RIGHT", "right_stick"),
+                                 font=UI_FONT, fg=p["muted"], bg=p["panel"])
+        self.rs_title.pack()
+        self.right_canvas = tk.Canvas(self.rs_frame, bg=p["canvas"], width=150, height=150,
                                       highlightthickness=0)
         self.right_canvas.pack(padx=5, pady=5)
         self.rs_label = tk.Label(self.rs_frame, text="X: 0.00  Y: 0.00",
-                                 font=("Consolas", 9), fg="#00ff88", bg="#16213e")
+                                 font=VALUE_FONT, fg=p["text"], bg=p["panel"])
         self.rs_label.pack()
 
         # Triggers (container for show/hide)
-        self.trig_frame = tk.Frame(self.viz_frame, bg="#16213e")
+        self.trig_frame = tk.Frame(self.viz_frame, bg=p["panel"])
         self.trig_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        tk.Label(self.trig_frame, text="LT", font=("Consolas", 9, "bold"),
-                 fg="#888", bg="#16213e").pack(side=tk.LEFT)
-        self.lt_bar = tk.Canvas(self.trig_frame, bg="#0a0a1a", height=20, highlightthickness=0)
+        tk.Label(self.trig_frame, text="LT", font=UI_FONT,
+                 fg=p["muted"], bg=p["panel"]).pack(side=tk.LEFT)
+        self.lt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], height=20, highlightthickness=0)
         self.lt_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.rt_bar = tk.Canvas(self.trig_frame, bg="#0a0a1a", height=20, highlightthickness=0)
+        self.rt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], height=20, highlightthickness=0)
         self.rt_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        tk.Label(self.trig_frame, text="RT", font=("Consolas", 9, "bold"),
-                 fg="#888", bg="#16213e").pack(side=tk.LEFT)
+        tk.Label(self.trig_frame, text="RT", font=UI_FONT,
+                 fg=p["muted"], bg=p["panel"]).pack(side=tk.LEFT)
 
         # Buttons status (container for show/hide)
         self.btn_label = tk.Label(
-            self.viz_frame, text="Buttons: ---", font=("Consolas", 10),
-            fg="#ffcc00", bg="#16213e", anchor=tk.W
+            self.viz_frame, text="Buttons: ---", font=UI_FONT,
+            fg=p["text"], bg=p["panel"], anchor=tk.W
         )
         self.btn_label.pack(fill=tk.X, padx=10, pady=5)
 
         # Raw WASD values
         self.raw_label = tk.Label(
-            self.viz_frame, text="Raw WASD: ---", font=("Consolas", 9),
-            fg="#666", bg="#16213e", anchor=tk.W
+            self.viz_frame, text="Raw WASD: ---", font=VALUE_FONT,
+            fg=p["muted"], bg=p["panel"], anchor=tk.W
         )
         self.raw_label.pack(fill=tk.X, padx=10, pady=(0, 5))
 
-        # ── Right: settings ──
-        self.settings_frame = tk.LabelFrame(
-            main, text=" SETTINGS ", font=("Consolas", 10, "bold"),
-            fg="#00ccff", bg="#16213e", width=280
-        )
-        self.settings_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0))
-        self.settings_frame.pack_propagate(False)
+        # ── Right: tabs ──
+        right = tk.Frame(main, bg=p["bg"])
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(4, 0), before=self.viz_frame)  # packed first: keeps its width in full mode
 
+        # Reset row at the bottom, packed first so the notebook cannot push it out
+        reset_row = tk.Frame(right, bg=p["bg"])
+        reset_row.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+        self.reset_btn = tk.Button(
+            reset_row, text="Reset to defaults", font=UI_FONT, relief=tk.FLAT,
+            bg=p["field"], fg=p["text"], activebackground=p["border"],
+            command=self._reset_defaults
+        )
+        self.reset_btn.pack(side=tk.LEFT)
+        self.saved_label = tk.Label(reset_row, text="", font=UI_FONT,
+                                    fg=p["ok"], bg=p["bg"])
+        self.saved_label.pack(side=tk.LEFT, padx=8)
+
+        self.tabs = ttk.Notebook(right)
+        self.tabs.pack(fill=tk.BOTH, expand=True)
+
+        tune = tk.Frame(self.tabs, bg=p["panel"])
+        bind = tk.Frame(self.tabs, bg=p["panel"])
+        self.tabs.add(tune, text="Tuning")
+        self.tabs.add(bind, text="Bindings")
+
+        # Tuning: one grid row per slider
         self.sliders = {}
-        self.slider_frames = {}
+        self.slider_labels = {}
+        self.slider_rows = {}  # key -> ((name, slider, value), shown in hybrid)
         slider_defs = [
-            ("deadzone", "Deadzone", 0, 0.5, self.settings["deadzone"], True),
-            ("smoothing", "Smoothing", 0, 0.95, self.settings["smoothing"], True),
-            ("sensitivity_curve", "Sensitivity", 0.2, 3.0, self.settings["sensitivity_curve"], True),
-            ("button_threshold", "Btn Threshold", 0.01, 0.5, self.settings["button_threshold"], False),
-            ("trigger_threshold", "Trig Threshold", 0.01, 0.5, self.settings["trigger_threshold"], False),
-            ("analog_max_override", "Analog Max", 100, max(500, round(ANALOG_MAX * 1.5)), self.settings["analog_max_override"], True),
+            ("deadzone", "Deadzone", 0, 0.5, True),
+            ("smoothing", "Smoothing", 0, 0.95, True),
+            ("sensitivity_curve", "Sensitivity", 0.2, 3.0, True),
+            ("button_threshold", "Btn Threshold", 0.01, 0.5, False),
+            ("trigger_threshold", "Trig Threshold", 0.01, 0.5, False),
+            ("analog_max_override", "Analog Max", 100, max(500, round(ANALOG_MAX * 1.5)), True),
         ]
 
-        for key, label, min_v, max_v, default, show_hybrid in slider_defs:
-            f = tk.Frame(self.settings_frame, bg="#16213e")
-            f.pack(fill=tk.X, padx=8, pady=4)
+        for row, (key, label, min_v, max_v, show_hybrid) in enumerate(slider_defs):
+            name = tk.Label(tune, text=label, font=UI_FONT, fg=p["text"],
+                            bg=p["panel"], width=12, anchor=tk.W)
+            name.grid(row=row, column=0, sticky="w", padx=(8, 4), pady=4)
 
-            val_label = tk.Label(f, text=f"{label}: {default:.2f}",
-                                 font=("Consolas", 9), fg="#ccc", bg="#16213e", width=22, anchor=tk.W)
-            val_label.pack()
+            slider = ttk.Scale(tune, from_=min_v, to=max_v, value=self.settings[key],
+                               orient=tk.HORIZONTAL, length=130,
+                               command=lambda v, k=key: self._on_slider(k, v))
+            slider.grid(row=row, column=1, sticky="ew", padx=4, pady=4)
 
-            slider = ttk.Scale(f, from_=min_v, to=max_v, value=default, orient=tk.HORIZONTAL,
-                              command=lambda v, k=key, l=val_label, lb=label: self._on_slider(k, v, l, lb))
-            slider.pack(fill=tk.X)
+            value = tk.Label(tune, text="", font=VALUE_FONT, fg=p["text"],
+                             bg=p["panel"], width=6, anchor=tk.E)
+            value.grid(row=row, column=2, sticky="e", padx=(4, 8), pady=4)
+
             self.sliders[key] = slider
-            self.slider_frames[key] = (f, show_hybrid)
+            self.slider_labels[key] = value
+            self.slider_rows[key] = ((name, slider, value), show_hybrid)
+            self._show_value(key)
 
-        # Bindings section
-        self.bindings_label = tk.Label(self.settings_frame, text="KEY BINDINGS",
-                                        font=("Consolas", 9, "bold"),
-                                        fg="#ffcc00", bg="#16213e")
-        self.bindings_label.pack(pady=(10, 2))
-
-        self.bind_container = tk.Frame(self.settings_frame, bg="#16213e")
-        self.bind_container.pack(fill=tk.BOTH, expand=True)
-
-        bind_canvas = tk.Canvas(self.bind_container, bg="#16213e", highlightthickness=0)
-        bind_scroll = ttk.Scrollbar(self.bind_container, orient=tk.VERTICAL, command=bind_canvas.yview)
-        bind_inner = tk.Frame(bind_canvas, bg="#16213e")
+        # Bindings: scrollable list of groups
+        bind_canvas = tk.Canvas(bind, bg=p["panel"], highlightthickness=0,
+                                width=300, height=230)
+        bind_scroll = ttk.Scrollbar(bind, orient=tk.VERTICAL, command=bind_canvas.yview)
+        bind_inner = tk.Frame(bind_canvas, bg=p["panel"])
 
         bind_inner.bind("<Configure>", lambda e: bind_canvas.configure(scrollregion=bind_canvas.bbox("all")))
         bind_canvas.create_window((0, 0), window=bind_inner, anchor=tk.NW)
         bind_canvas.configure(yscrollcommand=bind_scroll.set)
 
-        bind_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        bind_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        bind_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=8)
+        bind_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=4, pady=8)
 
         self.bind_vars = {}
-        self.bind_rows = {}
+        self.bind_widgets = {}
+        self.bind_groups = []  # (group frame, shown in hybrid)
         all_keys = sorted(self.key_mapping.keys())
 
-        HYBRID_BINDINGS = {"left_stick_up", "left_stick_down", "left_stick_left", "left_stick_right"}
+        for row, (title, actions) in enumerate(BINDING_GROUPS):
+            group = tk.Frame(bind_inner, bg=p["panel"])
+            group.grid(row=row, column=0, sticky="ew", pady=(4, 0))
+            tk.Label(group, text=title, font=TITLE_FONT,
+                     fg=p["muted"], bg=p["panel"], anchor=tk.W).pack(fill=tk.X)
 
-        for action in sorted(self.bindings.keys()):
-            f = tk.Frame(bind_inner, bg="#16213e")
-            f.pack(fill=tk.X, pady=1)
+            for action, friendly in actions:
+                f = tk.Frame(group, bg=p["panel"])
+                f.pack(fill=tk.X, pady=1)
 
-            short = action.replace("left_stick_", "LS_").replace("right_stick_", "RS_")
-            short = short.replace("btn_", "").replace("thumb_", "Th")
+                tk.Label(f, text=f"{friendly}:", font=UI_FONT,
+                         fg=p["text"], bg=p["panel"], width=12, anchor=tk.E).pack(side=tk.LEFT)
 
-            tk.Label(f, text=f"{short}:", font=("Consolas", 8),
-                     fg="#aaa", bg="#16213e", width=12, anchor=tk.E).pack(side=tk.LEFT)
+                self.bindings.setdefault(action, DEFAULT_BINDINGS[action])
+                var = tk.StringVar(value=self.bindings[action])
+                combo = ttk.Combobox(f, textvariable=var, values=all_keys,
+                                     width=8, font=VALUE_FONT, state="readonly")
+                combo.pack(side=tk.LEFT, padx=2)
+                combo.bind("<<ComboboxSelected>>",
+                           lambda e, a=action, v=var: self._on_binding_change(a, v))
+                self.bind_vars[action] = var
+                self.bind_widgets[action] = combo
 
-            var = tk.StringVar(value=self.bindings[action])
-            combo = ttk.Combobox(f, textvariable=var, values=all_keys,
-                                width=8, font=("Consolas", 8), state="readonly")
-            combo.pack(side=tk.LEFT, padx=2)
-            combo.bind("<<ComboboxSelected>>",
-                       lambda e, a=action, v=var: self._on_binding_change(a, v))
-            self.bind_vars[action] = var
-            self.bind_rows[action] = (f, action in HYBRID_BINDINGS)
-
-        # Save button
-        tk.Button(self.settings_frame, text="SAVE CONFIG", font=("Consolas", 10, "bold"),
-                  bg="#2266cc", fg="white", command=self._save_gamepad_config
-                  ).pack(fill=tk.X, padx=8, pady=8)
+            self.bind_groups.append((group, title == "Left stick"))
 
         # Apply initial mode UI
         self._update_mode_ui()
 
-    def _on_mode_change(self, event=None):
-        mode = self.mode_var.get()
+    def _stick_title(self, side, prefix):
+        keys = [self.bindings.get(f"{prefix}_{d}", "") for d in ("up", "left", "down", "right")]
+        return f"{side} STICK ({' '.join(keys)})"
+
+    def _refresh_stick_titles(self):
+        self.ls_title.config(text=self._stick_title("LEFT", "left_stick"))
+        self.rs_title.config(text=self._stick_title("RIGHT", "right_stick"))
+
+    def _show_value(self, key):
+        v = self.settings[key]
+        text = f"{round(v)}" if key == "analog_max_override" else f"{v:.2f}"
+        self.slider_labels[key].config(text=text)
+
+    def _set_mode(self, mode):
+        self.mode_var.set(mode)
         self.settings["mode"] = mode
         self._update_mode_ui()
+        self._schedule_save()
 
     def _update_mode_ui(self):
+        p = PALETTE
         mode = self.settings.get("mode", MODE_HYBRID)
         is_hybrid = (mode == MODE_HYBRID)
 
-        # Mode description
+        # Mode hint
         if is_hybrid:
             self.mode_desc.config(
-                text="HYBRID: Left stick only. Keyboard + mouse pass through to game.",
-                fg="#00ff88"
+                text="HYBRID: left stick only. Keyboard and mouse pass through to the game."
             )
         else:
             self.mode_desc.config(
-                text="FULL: All inputs mapped to Xbox controller.",
-                fg="#ffcc00"
+                text="FULL: every input is mapped to the Xbox controller."
             )
 
-        # Show/hide right stick, triggers, buttons
+        # Right stick, triggers and buttons line: full mode only
         if is_hybrid:
             self.rs_frame.pack_forget()
             self.trig_frame.pack_forget()
             self.btn_label.pack_forget()
         else:
-            self.rs_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
-                               in_=self.sticks_frame)
-            self.trig_frame.pack(fill=tk.X, padx=10, pady=5,
-                                 in_=self.viz_frame, before=self.btn_label)
-            self.btn_label.pack(fill=tk.X, padx=10, pady=5, in_=self.viz_frame,
-                                before=self.raw_label)
+            self.rs_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            self.trig_frame.pack(fill=tk.X, padx=10, pady=5, before=self.raw_label)
+            self.btn_label.pack(fill=tk.X, padx=10, pady=5, before=self.raw_label)
 
-        # Show/hide slider frames (button/trigger thresholds only in full mode)
-        for key, (frame, show_in_hybrid) in self.slider_frames.items():
+        # Thresholds: full mode only (grid_remove keeps the row order)
+        for key, (widgets, show_in_hybrid) in self.slider_rows.items():
+            for w in widgets:
+                if is_hybrid and not show_in_hybrid:
+                    w.grid_remove()
+                else:
+                    w.grid()
+
+        # Binding groups: hybrid shows only the left stick
+        for group, show_in_hybrid in self.bind_groups:
             if is_hybrid and not show_in_hybrid:
-                frame.pack_forget()
+                group.grid_remove()
             else:
-                frame.pack(fill=tk.X, padx=8, pady=4, in_=self.settings_frame)
+                group.grid()
 
-        # Show/hide binding rows
-        for action, (frame, show_in_hybrid) in self.bind_rows.items():
-            if is_hybrid and not show_in_hybrid:
-                frame.pack_forget()
-            else:
-                frame.pack(fill=tk.X, pady=1)
-
-    def _on_slider(self, key, value, label_widget, label_text):
-        v = float(value)
-        self.settings[key] = v
-        label_widget.config(text=f"{label_text}: {v:.2f}")
+    def _on_slider(self, key, value):
+        self.settings[key] = float(value)
+        self._show_value(key)
+        self._schedule_save()
 
     def _on_binding_change(self, action, var):
         self.bindings[action] = var.get()
+        self._refresh_stick_titles()
+        self._schedule_save()
+
+    def _reset_defaults(self):
+        self.settings = dict(DEFAULT_SETTINGS)
+        self.bindings = dict(DEFAULT_BINDINGS)
+
+        self.mode_var.set(self.settings["mode"])
+        for key, slider in self.sliders.items():
+            slider.set(self.settings[key])
+            self._show_value(key)
+        for action, var in self.bind_vars.items():
+            var.set(self.bindings[action])
+        self._refresh_stick_titles()
+        self._update_mode_ui()
+        self._schedule_save()
 
     def _init_hid(self):
+        p = PALETTE
         devices = hid.find_all_hid_devices()
         kbd_devs = [d for d in devices if d.vendor_id == VID and d.product_id == PID]
 
@@ -609,9 +752,9 @@ class GamepadApp:
         self.config_path = find_config_interface(self.opened_devices)
 
         if self.opened_devices:
-            self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)", fg="#ffcc00")
+            self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)", fg=p["ok"])
         else:
-            self.status_label.config(text="HID ERROR", fg="#ff4444")
+            self.status_label.config(text="HID ERROR", fg=p["error"])
 
     def _send_feature(self, cmd):
         if not self.config_path:
@@ -643,25 +786,28 @@ class GamepadApp:
             self._activate()
 
     def _activate(self):
+        p = PALETTE
         # Enable analog mode
         if not self._send_feature(ENABLE_CMD):
-            self.status_label.config(text="ENABLE FAILED", fg="#ff4444")
+            self.status_label.config(text="ENABLE FAILED", fg=p["error"])
             return
 
         # Create gamepad
         try:
             gamepad = VirtualGamepad()
         except Exception as e:
-            self.status_label.config(text=f"ViGEm ERROR: {e}", fg="#ff4444")
+            self.status_label.config(text=f"ViGEm ERROR: {e}", fg=p["error"])
             return
 
         with self.pad_lock:
             self.gamepad = gamepad
             self.active = True
-        self.status_label.config(text="GAMEPAD ACTIVE", fg="#00ff88")
-        self.toggle_btn.config(text="DEACTIVATE", bg="#cc2222")
+        self.status_label.config(text="GAMEPAD ACTIVE", fg=p["ok"])
+        self.toggle_btn.config(text="Deactivate", bg=p["panel"], fg=p["error"],
+                               activebackground=p["panel"])
 
     def _deactivate(self):
+        p = PALETTE
         with self.pad_lock:
             self.active = False
             gamepad, self.gamepad = self.gamepad, None
@@ -673,8 +819,9 @@ class GamepadApp:
             gamepad.pad.update()
             del gamepad.pad
 
-        self.status_label.config(text="GAMEPAD OFF", fg="#ffcc00")
-        self.toggle_btn.config(text="ACTIVATE GAMEPAD", bg="#00aa55")
+        self.status_label.config(text="GAMEPAD OFF", fg=p["warn"])
+        self.toggle_btn.config(text="Activate", bg=p["accent"], fg=p["bg"],
+                               activebackground=p["accent"])
 
     def _gamepad_worker(self):
         """Send the gamepad state as soon as a HID report arrives.
@@ -739,6 +886,7 @@ class GamepadApp:
         self.root.after(33, self._ui_update_loop)
 
     def _draw_stick(self, canvas, x, y):
+        p = PALETTE
         canvas.delete("all")
         w = canvas.winfo_width()
         h = canvas.winfo_height()
@@ -750,33 +898,24 @@ class GamepadApp:
 
         # Outer circle
         canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
-                          outline="#333355", width=2)
+                           outline=p["grid"], width=1)
 
         # Cross
-        canvas.create_line(cx - r, cy, cx + r, cy, fill="#222244")
-        canvas.create_line(cx, cy - r, cx, cy + r, fill="#222244")
+        canvas.create_line(cx - r, cy, cx + r, cy, fill=p["grid"])
+        canvas.create_line(cx, cy - r, cx, cy + r, fill=p["grid"])
 
         # Deadzone circle
         dz = self.settings.get("deadzone", 0.05)
         dz_r = r * dz
         canvas.create_oval(cx - dz_r, cy - dz_r, cx + dz_r, cy + dz_r,
-                          outline="#442222", width=1, dash=(2, 2))
+                           outline=p["grid"], width=1, dash=(2, 2))
 
-        # Dot position
+        # Dot position: solid accent, radius 6
         dx = cx + x * r
         dy = cy - y * r  # Y inverted
-        dot_r = 8
-
-        # Trail (magnitude indicator)
-        mag = math.sqrt(x ** 2 + y ** 2)
-        if mag > 0.01:
-            intensity = min(255, int(mag * 255))
-            color = f'#{intensity:02X}{max(0, 255 - intensity):02X}00'
-        else:
-            color = '#00ff88'
-
+        dot_r = 6
         canvas.create_oval(dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r,
-                          fill=color, outline="white", width=2)
+                           fill=p["accent"], outline="")
 
     def _draw_trigger(self, canvas, value):
         canvas.delete("all")
@@ -786,15 +925,18 @@ class GamepadApp:
             return
 
         bar_w = int(value * w)
-        intensity = min(255, int(value * 255))
-        color = f'#{intensity:02X}{max(0, 200 - intensity):02X}00'
-        canvas.create_rectangle(0, 0, bar_w, h, fill=color)
+        canvas.create_rectangle(0, 0, bar_w, h, fill=PALETTE["accent"], outline="")
 
     def _on_close(self):
         self.running = False
         self.worker.join(timeout=0.5)
         if self.active:
             self._deactivate()
+        # Write a pending debounced save before the window goes away
+        if self._save_job:
+            self.root.after_cancel(self._save_job)
+            self._save_job = None
+            self._save_gamepad_config()
         winmm.timeEndPeriod(1)
         for d in self.opened_devices:
             try:
