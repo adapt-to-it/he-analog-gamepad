@@ -327,8 +327,8 @@ class GamepadApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{DEVICE_NAME} → Xbox 360 Gamepad")
-        self.root.geometry("760x480")
-        self.root.minsize(700, 440)
+        self.root.geometry("760x440")
+        self.root.minsize(700, 420)
         self.root.configure(bg=PALETTE["bg"])
         self.root.resizable(True, True)
 
@@ -416,9 +416,22 @@ class GamepadApp:
         style.map("TNotebook.Tab",
                   background=[("selected", p["field"])],
                   foreground=[("selected", p["text"])])
-        style.configure("TScale", background=p["panel"], troughcolor=p["field"],
-                        bordercolor=p["panel"], lightcolor=p["panel"], darkcolor=p["panel"])
-        style.map("TScale", background=[("active", p["panel"])])
+        # clam draws the slider thumb with "background": accent thumb on a field trough
+        style.configure("TScale", background=p["accent"], troughcolor=p["canvas"],
+                        bordercolor=p["panel"], lightcolor=p["accent"], darkcolor=p["accent"],
+                        sliderlength=14)
+        style.map("TScale", background=[("active", p["text"])])
+        # ttk buttons: tk.Button ignores colors on macOS (native white button)
+        for name, bg, fg, hover in (("Accent.TButton", p["accent"], p["bg"], p["text"]),
+                                    ("Danger.TButton", p["field"], p["error"], p["border"]),
+                                    ("Flat.TButton", p["field"], p["text"], p["border"])):
+            style.configure(name, background=bg, foreground=fg, bordercolor=bg,
+                            lightcolor=bg, darkcolor=bg, focuscolor=bg,
+                            padding=(10, 4), relief="flat")
+            style.map(name, background=[("pressed", hover), ("active", hover)],
+                      lightcolor=[("active", hover)], darkcolor=[("active", hover)])
+        style.configure("Accent.TButton", font=TITLE_FONT)
+        style.configure("Danger.TButton", font=TITLE_FONT)
         style.configure("TRadiobutton", background=p["panel"], foreground=p["text"], font=UI_FONT)
         style.map("TRadiobutton",
                   background=[("active", p["panel"])],
@@ -456,9 +469,8 @@ class GamepadApp:
         self.status_label.pack(side=tk.LEFT, padx=4, pady=8)
 
         # Accent when off; panel with error text when on
-        self.toggle_btn = tk.Button(
-            top, text="Activate", font=TITLE_FONT, relief=tk.FLAT,
-            bg=p["accent"], fg=p["bg"], activebackground=p["accent"],
+        self.toggle_btn = ttk.Button(
+            top, text="Activate", style="Accent.TButton",
             command=self._toggle_active, width=14
         )
         self.toggle_btn.pack(side=tk.RIGHT, padx=10, pady=8)
@@ -496,7 +508,7 @@ class GamepadApp:
 
         # Stick canvases side by side
         self.sticks_frame = tk.Frame(self.viz_frame, bg=p["panel"])
-        self.sticks_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.sticks_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Left stick
         ls_frame = tk.Frame(self.sticks_frame, bg=p["panel"])
@@ -530,9 +542,9 @@ class GamepadApp:
 
         tk.Label(self.trig_frame, text="LT", font=UI_FONT,
                  fg=p["muted"], bg=p["panel"]).pack(side=tk.LEFT)
-        self.lt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], height=20, highlightthickness=0)
+        self.lt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], width=1, height=16, highlightthickness=0)
         self.lt_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.rt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], height=20, highlightthickness=0)
+        self.rt_bar = tk.Canvas(self.trig_frame, bg=p["canvas"], width=1, height=16, highlightthickness=0)
         self.rt_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         tk.Label(self.trig_frame, text="RT", font=UI_FONT,
                  fg=p["muted"], bg=p["panel"]).pack(side=tk.LEFT)
@@ -558,9 +570,8 @@ class GamepadApp:
         # Reset row at the bottom, packed first so the notebook cannot push it out
         reset_row = tk.Frame(right, bg=p["bg"])
         reset_row.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
-        self.reset_btn = tk.Button(
-            reset_row, text="Reset to defaults", font=UI_FONT, relief=tk.FLAT,
-            bg=p["field"], fg=p["text"], activebackground=p["border"],
+        self.reset_btn = ttk.Button(
+            reset_row, text="Reset to defaults", style="Flat.TButton",
             command=self._reset_defaults
         )
         self.reset_btn.pack(side=tk.LEFT)
@@ -803,8 +814,7 @@ class GamepadApp:
             self.gamepad = gamepad
             self.active = True
         self.status_label.config(text="GAMEPAD ACTIVE", fg=p["ok"])
-        self.toggle_btn.config(text="Deactivate", bg=p["panel"], fg=p["error"],
-                               activebackground=p["panel"])
+        self.toggle_btn.config(text="Deactivate", style="Danger.TButton")
 
     def _deactivate(self):
         p = PALETTE
@@ -820,8 +830,7 @@ class GamepadApp:
             del gamepad.pad
 
         self.status_label.config(text="GAMEPAD OFF", fg=p["warn"])
-        self.toggle_btn.config(text="Activate", bg=p["accent"], fg=p["bg"],
-                               activebackground=p["accent"])
+        self.toggle_btn.config(text="Activate", style="Accent.TButton")
 
     def _gamepad_worker(self):
         """Send the gamepad state as soon as a HID report arrives.
