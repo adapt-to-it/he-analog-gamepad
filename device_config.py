@@ -68,18 +68,39 @@ def load_protocol(path):
     return protocol
 
 
-def resolve_config_path(base_dir, connected_ids):
+def resolve_config_path(base_dir, connected):
     """Pick the config for the keyboard that is plugged in.
 
-    Checks key_config.json first, then devices/*.json. connected_ids is a set
-    of (vid, pid) tuples. Returns key_config.json when nothing matches.
+    connected holds (vid, pid, product_name) tuples; (vid, pid) also works.
+    Checks key_config.json first, then devices/*.json. Some models share
+    VID and PID (R68 HE and X98 HE are both 0x3151:0x5029), so a config with
+    "device.product_name" matches only the keyboard with that USB product
+    name. Order of preference:
+      1. VID, PID and product name match;
+      2. VID and PID match, the config has no product name;
+      3. VID and PID match, the product name differs (unknown model).
+    Returns key_config.json when no VID/PID matches.
     """
+    ids = {(c[0], c[1]) for c in connected}
+    products = {(c[0], c[1], (c[2] or "").strip()) for c in connected if len(c) > 2}
     default = os.path.join(base_dir, "key_config.json")
     candidates = [default] + sorted(glob.glob(os.path.join(base_dir, "devices", "*.json")))
+    generic = other = None
     for path in candidates:
-        if os.path.exists(path) and load_device_ids(path)[:2] in connected_ids:
+        if not os.path.exists(path):
+            continue
+        vid, pid, _ = load_device_ids(path)
+        if (vid, pid) not in ids:
+            continue
+        device = _read_json(path).get("device")
+        product = device.get("product_name") if isinstance(device, dict) else None
+        if not product:
+            generic = generic or path
+        elif (vid, pid, product.strip()) in products:
             return path
-    return default
+        else:
+            other = other or path
+    return generic or other or default
 
 
 def find_config_interface(opened_devices):

@@ -29,6 +29,7 @@ ctypes.WinDLL = lambda name: types.SimpleNamespace(
 class FakeDevice:
     vendor_id, product_id = 0x3151, 0x5029
     device_path = r"\\?\hid#vid_3151&pid_5029&mi_02"
+    product_name = "Gaming Keyboard"
     hid_caps = types.SimpleNamespace(usage_page=0xFFFF, usage=0x0002)
 
     def open(self): pass

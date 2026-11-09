@@ -1,6 +1,7 @@
 {
   "device": {
     "name": "X98 HE",
+    "product_name": "Gaming Keyboard",
     "vid": "0x3151",
     "pid": "0x5029",
     "vid_int": 12625,
