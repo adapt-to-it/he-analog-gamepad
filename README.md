@@ -16,6 +16,7 @@ Hall Effect keyboards measure how far you press each key. This app reads that va
 |--------|--------|
 | Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
 | Attack Shark X68HE (PID `0x502D`) | Confirmed working ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
+| Attack Shark R68 HE (PID `0x5029`) | Config ready, waiting for user confirmation ([#15](https://github.com/adapt-to-it/he-analog-gamepad/issues/15)) |
 | Attack Shark X98 HE (PID `0x5029`) | Confirmed working ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
@@ -154,7 +155,7 @@ The sliders in the **Tuning** tab change how the keys feel. Every change is save
 **The keyboard is not detected**
 - Connect the keyboard with the USB cable. Wireless mode does not expose the analog interface.
 - Close the manufacturer's software: it can take exclusive access to the device.
-- Check in Device Manager that the VID/PID matches a supported model: `0x3151` / `0x5030` (X68PRO HE), `0x3151` / `0x502D` (X68HE), `0x3151` / `0x5029` (X98 HE).
+- Check in Device Manager that the VID/PID matches a supported model: `0x3151` / `0x5030` (X68PRO HE), `0x3151` / `0x502D` (X68HE), `0x3151` / `0x5029` (X98 HE and R68 HE).
 
 **"ENABLE FAILED" when activating the gamepad**
 - The app could not open the keyboard's configuration interface. Unplug and reconnect the keyboard.
@@ -236,7 +237,9 @@ Each model has a JSON config with its device IDs, protocol and key mapping:
 - `key_config.json` -- X68PRO HE (67 keys).
 - `devices/*.json` -- other models, for example `devices/x68he_502d.json` and `devices/x98he_5029.json`.
 
-At startup both apps check `key_config.json` first, then every file in `devices/`, and use the first one whose VID and PID match the connected keyboard. The config sets the analog commands and the analog range (`analog_max`: 350 on the X68PRO HE, 730 on the X68HE, 700 on the X98 HE).
+At startup both apps check `key_config.json` first, then every file in `devices/`, and use the first one whose VID and PID match the connected keyboard. The config sets the analog commands and the analog range (`analog_max`: 350 on the X68PRO HE, 730 on the X68HE, 700 on the X98 HE, 690 on the R68 HE).
+
+Some models share VID and PID: the X98 HE and the R68 HE are both `0x3151:0x5029`, but some keys have different IDs. Their configs store the USB product name in `device.product_name` ("Gaming Keyboard" and "R68HE"), and the apps pick the config whose product name matches. The capture page writes this field automatically.
 
 To add a model, save the `key_config.json` produced by the capture page as `devices/<model>.json`. No code changes are needed. You should not need to edit these files by hand.
 

@@ -178,8 +178,8 @@
     });
     return {
       device: dev
-        ? { name: dev.productName, vid: dev.vid, pid: dev.pid, vid_int: dev.vendorId, pid_int: dev.productId }
-        : { name: null, vid: null, pid: null, vid_int: null, pid_int: null },
+        ? { name: dev.productName, product_name: dev.productName, vid: dev.vid, pid: dev.pid, vid_int: dev.vendorId, pid_int: dev.productId }
+        : { name: null, product_name: null, vid: null, pid: null, vid_int: null, pid_int: null },
       protocol: {
         enable_cmd: Array.from(buildCommand(true)),
         disable_cmd: Array.from(buildCommand(false)),

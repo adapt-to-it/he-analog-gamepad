@@ -34,7 +34,8 @@ from device_config import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Pick the config that matches the plugged-in keyboard (key_config.json or devices/*.json).
-_CONNECTED = {(d.vendor_id, d.product_id) for d in hid.find_all_hid_devices()}
+_CONNECTED = {(d.vendor_id, d.product_id, getattr(d, "product_name", "") or "")
+              for d in hid.find_all_hid_devices()}
 CONFIG_PATH = resolve_config_path(BASE_DIR, _CONNECTED)
 GAMEPAD_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "gamepad_config.json")
 
@@ -463,7 +464,7 @@ class GamepadApp:
         top = tk.Frame(self.root, bg=p["panel"])
         top.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        connected = (VID, PID) in _CONNECTED
+        connected = any(c[:2] == (VID, PID) for c in _CONNECTED)
         self.device_label = tk.Label(
             top, text=f"{DEVICE_NAME} {'connected' if connected else 'not found'}",
             font=TITLE_FONT, fg=p["ok"] if connected else p["error"], bg=p["panel"]

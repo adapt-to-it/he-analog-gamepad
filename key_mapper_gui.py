@@ -19,7 +19,8 @@ from device_config import (
 )
 
 # Pick the config that matches the plugged-in keyboard (key_config.json or devices/*.json).
-_CONNECTED = {(d.vendor_id, d.product_id) for d in hid.find_all_hid_devices()}
+_CONNECTED = {(d.vendor_id, d.product_id, getattr(d, "product_name", "") or "")
+              for d in hid.find_all_hid_devices()}
 CONFIG_PATH = resolve_config_path(os.path.dirname(os.path.abspath(__file__)), _CONNECTED)
 VID, PID, DEVICE_NAME = load_device_ids(CONFIG_PATH)
 PROTOCOL = load_protocol(CONFIG_PATH)
