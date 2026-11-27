@@ -31,14 +31,16 @@ class FakeDevice:
     device_path = r"\\?\hid#vid_3151&pid_5029&mi_02"
     product_name = "Gaming Keyboard"
     hid_caps = types.SimpleNamespace(usage_page=0xFFFF, usage=0x0002)
+    plugged = True
 
+    def is_plugged(self): return FakeDevice.plugged
     def open(self): pass
     def close(self): pass
     def set_raw_data_handler(self, h): pass
 
 
 hid = types.ModuleType("pywinusb.hid")
-hid.find_all_hid_devices = lambda: [FakeDevice()]
+hid.find_all_hid_devices = lambda: [FakeDevice()] if FakeDevice.plugged else []
 pywinusb = types.ModuleType("pywinusb")
 pywinusb.hid = hid
 sys.modules.update({"pywinusb": pywinusb, "pywinusb.hid": hid})
@@ -172,6 +174,37 @@ check(app.bindings == V.DEFAULT_BINDINGS and app.bind_vars["btn_a"].get() == "SP
       "reset restores bindings and the controls")
 check(abs(float(app.sliders["deadzone"].get()) - V.DEFAULT_SETTINGS["deadzone"]) < 1e-6,
       "reset moves the slider")
+
+# Reconnect: unplug while active, plug back in
+app.WATCH_INTERVAL_MS = 20
+app._activate()
+check(app.active and FEATURES[-1] == 0x1B, "activate sends ENABLE")
+app.kb_state.update(ids["W"], 500)
+app._hid_handler([V.REPORT_ID, V.PREFIX, 0, 0, ids["W"]])
+FakeDevice.plugged = False
+pump(0.15)
+check(not app.opened_devices and "not found" in app.device_label.cget("text"),
+      "unplug closes the devices and shows 'not found'")
+check(app.kb_state.get("W") == 0, "unplug releases held keys")
+n = len(FEATURES)
+FakeDevice.plugged = True
+pump(0.15)
+check(app.opened_devices and "connected" in app.device_label.cget("text"),
+      "replug reopens the keyboard")
+check(app.active and FEATURES[n:n + 1] == [0x1B], "replug re-sends ENABLE while active")
+
+# ENABLE retry when no analog report arrives
+app.ENABLE_RETRY_AFTER = 0.05
+n = len(FEATURES)
+pump(0.5)
+retries = FEATURES[n:].count(0x1B)
+check(retries == app.ENABLE_RETRIES, f"ENABLE re-sent {app.ENABLE_RETRIES} times without reports ({retries})")
+app._send_enable()
+app._hid_handler([V.REPORT_ID, V.PREFIX, 0, 0, ids["W"]])
+n = len(FEATURES)
+pump(0.3)
+check(FEATURES[n:].count(0x1B) == 0, "no ENABLE retry once reports arrive")
+app._deactivate()
 
 # UI loop survives live values in both modes
 app.lx_display, app.ly_display, app.lt_display = 0.5, -0.5, 0.7
