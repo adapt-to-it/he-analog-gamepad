@@ -147,6 +147,12 @@ class KeyboardState:
                 self.values[key_label] = analog_value
             self.changed.set()
 
+    def clear(self):
+        """Release every key, e.g. when the keyboard is unplugged mid-press."""
+        with self.lock:
+            self.values.clear()
+        self.changed.set()
+
     def get(self, key_label):
         with self.lock:
             return self.values.get(key_label, 0)
@@ -817,24 +823,87 @@ class GamepadApp:
         self._update_mode_ui()
         self._schedule_save()
 
+    # ── Keyboard connection ──
+    WATCH_INTERVAL_MS = 1000   # how often the connection is checked
+    ENABLE_RETRY_AFTER = 2.0   # s without analog reports before ENABLE is sent again
+    ENABLE_RETRIES = 3         # extra ENABLE attempts after each activation/reconnect
+
     def _init_hid(self):
         p = PALETTE
-        devices = hid.find_all_hid_devices()
-        kbd_devs = [d for d in devices if d.vendor_id == VID and d.product_id == PID]
+        self.last_report = 0.0   # time of the last analog report
+        self.enable_sent = 0.0   # time of the last ENABLE
+        self.enable_retries = 0
+        if self._open_devices():
+            self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)", fg=p["ok"])
+        else:
+            self.status_label.config(text="HID ERROR", fg=p["error"])
+        self.root.after(self.WATCH_INTERVAL_MS, self._watch_device)
 
+    def _open_devices(self):
+        """Open every HID interface of the keyboard. Returns True if any opened."""
+        kbd_devs = [d for d in hid.find_all_hid_devices()
+                    if d.vendor_id == VID and d.product_id == PID]
         for d in kbd_devs:
             try:
                 d.open()
                 d.set_raw_data_handler(self._hid_handler)
                 self.opened_devices.append(d)
-            except:
+            except Exception:
                 pass
         self.config_path = find_config_interface(self.opened_devices)
+        return bool(self.opened_devices)
 
-        if self.opened_devices:
-            self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)", fg=p["ok"])
-        else:
-            self.status_label.config(text="HID ERROR", fg=p["error"])
+    def _close_devices(self):
+        for d in self.opened_devices:
+            try:
+                d.close()
+            except Exception:
+                pass
+        self.opened_devices = []
+        self.config_path = None
+
+    def _set_device_label(self, connected):
+        p = PALETTE
+        self.device_label.config(
+            text=f"{DEVICE_NAME} {'connected' if connected else 'not found'}",
+            fg=p["ok"] if connected else p["error"])
+
+    def _send_enable(self):
+        """Send ENABLE and arm the retries in _watch_device."""
+        self.enable_sent = time.time()
+        self.enable_retries = self.ENABLE_RETRIES
+        return self._send_feature(ENABLE_CMD)
+
+    def _watch_device(self):
+        """Reopen the keyboard after it is unplugged, and re-send ENABLE if needed."""
+        if not self.running:
+            return
+        p = PALETTE
+        plugged = any(getattr(d, "is_plugged", lambda: True)() for d in self.opened_devices)
+        if self.opened_devices and not plugged:
+            # Unplugged: drop the stale handles and release every key
+            self._close_devices()
+            self.kb_state.clear()
+            self._set_device_label(False)
+            self.status_label.config(text="WAITING FOR KEYBOARD", fg=p["warn"])
+        elif not self.opened_devices:
+            if self._open_devices():
+                self._set_device_label(True)
+                if self.active:
+                    ok = self._send_enable()
+                    self.status_label.config(text="GAMEPAD ACTIVE" if ok else "ENABLE FAILED",
+                                             fg=p["ok"] if ok else p["error"])
+                else:
+                    self.status_label.config(text=f"HID OK ({len(self.opened_devices)} ifaces)",
+                                             fg=p["ok"])
+        elif (self.active and self.enable_retries > 0
+              and self.last_report < self.enable_sent
+              and time.time() - self.enable_sent > self.ENABLE_RETRY_AFTER):
+            # The keyboard can miss the first ENABLE: no analog report since then
+            retries = self.enable_retries - 1
+            self._send_enable()
+            self.enable_retries = retries
+        self.root.after(self.WATCH_INTERVAL_MS, self._watch_device)
 
     def _send_feature(self, cmd):
         if not self.config_path:
@@ -857,6 +926,7 @@ class GamepadApp:
             return
         analog = data[BYTE_LO] + data[BYTE_HI] * 256
         key_id = data[KEY_ID_BYTE]
+        self.last_report = time.time()
         self.kb_state.update(key_id, analog)
 
     def _toggle_active(self):
@@ -868,7 +938,7 @@ class GamepadApp:
     def _activate(self):
         p = PALETTE
         # Enable analog mode
-        if not self._send_feature(ENABLE_CMD):
+        if not self._send_enable():
             self.status_label.config(text="ENABLE FAILED", fg=p["error"])
             return
 
@@ -1017,11 +1087,7 @@ class GamepadApp:
             self._save_job = None
             self._save_gamepad_config()
         winmm.timeEndPeriod(1)
-        for d in self.opened_devices:
-            try:
-                d.close()
-            except:
-                pass
+        self._close_devices()
         self.root.destroy()
 
 

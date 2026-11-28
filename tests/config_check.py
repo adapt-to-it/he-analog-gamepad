@@ -19,6 +19,7 @@ CASES = [
     # Same VID/PID: the USB product name picks the model
     ({(V, 0x5029, "Gaming Keyboard")}, "x98he_5029.json"),
     ({(V, 0x5029, "R68HE")}, "r68he_5029.json"),
+    ({(V, 0x5029, "R85HE")}, "r85he_5029.json"),
     ({(V, 0x5029)}, "r68he_5029.json"),  # no product name: first 0x5029 config
     (set(), "key_config.json"),
 ]

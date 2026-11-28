@@ -17,6 +17,7 @@ Hall Effect keyboards measure how far you press each key. This app reads that va
 | Attack Shark X68PRO HE (PID `0x5030`) | Confirmed working |
 | Attack Shark X68HE (PID `0x502D`) | Confirmed working ([#8](https://github.com/adapt-to-it/he-analog-gamepad/issues/8)) |
 | Attack Shark R68 HE (PID `0x5029`) | Config ready, waiting for user confirmation ([#15](https://github.com/adapt-to-it/he-analog-gamepad/issues/15)) |
+| Attack Shark R85 HE (PID `0x5029`) | Confirmed working ([#17](https://github.com/adapt-to-it/he-analog-gamepad/issues/17)) |
 | Attack Shark X98 HE (PID `0x5029`) | Confirmed working ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Attack Shark X82 PRO HE | In development -- data needed ([#4](https://github.com/adapt-to-it/he-analog-gamepad/issues/4)) |
 | Other Sonix-based HE keyboards | May work -- run the [capture page](#help-add-your-keyboard) and send us the files |
@@ -155,7 +156,10 @@ The sliders in the **Tuning** tab change how the keys feel. Every change is save
 **The keyboard is not detected**
 - Connect the keyboard with the USB cable. Wireless mode does not expose the analog interface.
 - Close the manufacturer's software: it can take exclusive access to the device.
-- Check in Device Manager that the VID/PID matches a supported model: `0x3151` / `0x5030` (X68PRO HE), `0x3151` / `0x502D` (X68HE), `0x3151` / `0x5029` (X98 HE and R68 HE).
+- Check in Device Manager that the VID/PID matches a supported model: `0x3151` / `0x5030` (X68PRO HE), `0x3151` / `0x502D` (X68HE), `0x3151` / `0x5029` (X98 HE, R68 HE and R85 HE).
+
+**The keyboard was unplugged**
+- Plug it back in: the app finds it again within a second and, if the gamepad was active, turns analog mode back on. You don't need to restart it.
 
 **"ENABLE FAILED" when activating the gamepad**
 - The app could not open the keyboard's configuration interface. Unplug and reconnect the keyboard.
